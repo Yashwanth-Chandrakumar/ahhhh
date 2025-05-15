@@ -217,13 +217,28 @@ export default function ChickenGamePage() {
 
   const updateGame = useCallback(() => { /* ... same, ensure getSoundInfo is called ... */
     const chicken = chickenRef.current; chicken.vy += GRAVITY; chicken.y += chicken.vy; chicken.onGround = false;
-    const soundInfo = getSoundInfo(); let isJumpingThisFrame = false;
-    if (soundInfo.detected) {
-      if (soundInfo.volume > baseSoundThreshold + JUMP_ACTIVATION_VOLUME_OFFSET) {
-        if (chicken.onGround) { isJumpingThisFrame = true; const normalizedVolume = Math.min(1, Math.max(0, (soundInfo.volume - (baseSoundThreshold + JUMP_ACTIVATION_VOLUME_OFFSET)) / (MAX_EXPECTED_VOLUME_FOR_JUMP_SCALING - (baseSoundThreshold + JUMP_ACTIVATION_VOLUME_OFFSET)))); chicken.vy = MIN_JUMP_STRENGTH + normalizedVolume * (MAX_JUMP_STRENGTH - MIN_JUMP_STRENGTH); }
+    const soundInfo = getSoundInfo();
+
+    // Player movement and jump based on sound volume
+    if (soundInfo.volume > baseSoundThreshold + JUMP_ACTIVATION_VOLUME_OFFSET) {
+        // High sound: Scaled jump and faster forward movement
+        if (chicken.onGround) {
+            const normalizedVolume = Math.min(1, Math.max(0,
+                (soundInfo.volume - (baseSoundThreshold + JUMP_ACTIVATION_VOLUME_OFFSET)) /
+                (MAX_EXPECTED_VOLUME_FOR_JUMP_SCALING - (baseSoundThreshold + JUMP_ACTIVATION_VOLUME_OFFSET))
+            ));
+            chicken.vy = MIN_JUMP_STRENGTH + normalizedVolume * (MAX_JUMP_STRENGTH - MIN_JUMP_STRENGTH);
+        }
         chicken.worldX += JUMP_FORWARD_SPEED;
-      } else { chicken.worldX += WALK_SPEED; }
+    } else if (soundInfo.volume > baseSoundThreshold) {
+        // Small sound: Small jump and normal forward movement
+        if (chicken.onGround) {
+            chicken.vy = MIN_JUMP_STRENGTH / 1.5; // Provides a smaller, distinct jump
+        }
+        chicken.worldX += WALK_SPEED;
     }
+    // If soundInfo.volume <= baseSoundThreshold, no sound-induced horizontal movement or jump initiation.
+
     const desiredCameraX = chicken.worldX - CAMERA_FOLLOW_X_OFFSET; cameraXRef.current += (desiredCameraX - cameraXRef.current) * 0.1; if (cameraXRef.current < 0) cameraXRef.current = 0;
     const chickenScreenX = chicken.worldX - cameraXRef.current; const chickenRect = { x: chickenScreenX, y: chicken.y, width: chicken.width, height: chicken.height }; let onAnySurface = false;
     levelElementsRef.current.forEach(element => { const elementScreenX = element.x - cameraXRef.current;
