@@ -40,11 +40,14 @@ export default function ChickenGamePage() {
   const analyserRef = useRef(null);
   const microphoneStreamRef = useRef(null);
   const dataArrayRef = useRef(null);
+  const audioElementRef = useRef(null); // Reference for audio element
+  const audioFileSourceRef = useRef(null); // Reference for audio file source node
 
   const [gameState, setGameState] = useState('loading');
   const [score, setScore] = useState(0);
   const [isMicrophoneAllowed, setIsMicrophoneAllowed] = useState(null);
   const [baseSoundThreshold, setBaseSoundThreshold] = useState(30);
+  const [useAudioFile, setUseAudioFile] = useState(false); // State to track audio source
 
   const chickenRef = useRef({ /* ... initial chicken state ... */
     worldX: CHICKEN_INITIAL_WORLD_X, y: CANVAS_HEIGHT - 100 - CHICKEN_HEIGHT,
@@ -188,7 +191,11 @@ export default function ChickenGamePage() {
     analyserRef.current.getByteFrequencyData(dataArrayRef.current);
     let sum = 0; for (let i = 0; i < dataArrayRef.current.length; i++) { sum += dataArrayRef.current[i]; }
     const averageVolume = sum / dataArrayRef.current.length;
-    return { detected: averageVolume > baseSoundThreshold, volume: averageVolume };
+    
+    // Invert the logic: Lower threshold value = less sensitive, Higher threshold value = more sensitive
+    const effectiveThreshold = 105 - baseSoundThreshold; // Inverts scale from 5-100 to 100-5
+    
+    return { detected: averageVolume > effectiveThreshold, volume: averageVolume };
   }, [baseSoundThreshold]);
 
   const resetGame = useCallback(() => { /* ... same ... */
@@ -224,26 +231,34 @@ export default function ChickenGamePage() {
     chicken.onGround = false; // Assume airborne for current frame's collision detection
 
     const soundInfo = getSoundInfo();
+    // Calculate the effective threshold using the same inverted logic as in getSoundInfo
+    const effectiveThreshold = 105 - baseSoundThreshold;
+    const JUMP_ACTIVATION_VOLUME_OFFSET_SCALED = 20 * (effectiveThreshold / 50); // Scale offset relative to threshold
+
+    // Debug values
+    window.lastSoundVolume = soundInfo.volume;
+    window.effectiveThreshold = effectiveThreshold;
+    window.jumpThreshold = effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED;
 
     // Player movement and jump based on sound volume
-    if (soundInfo.volume > baseSoundThreshold + JUMP_ACTIVATION_VOLUME_OFFSET) {
+    if (soundInfo.volume > effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED) {
         // High sound: Scaled jump and faster forward movement
         if (wasOnGround) { // Use status from start of frame
             const normalizedVolume = Math.min(1, Math.max(0,
-                (soundInfo.volume - (baseSoundThreshold + JUMP_ACTIVATION_VOLUME_OFFSET)) /
-                (MAX_EXPECTED_VOLUME_FOR_JUMP_SCALING - (baseSoundThreshold + JUMP_ACTIVATION_VOLUME_OFFSET))
+                (soundInfo.volume - (effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED)) /
+                (MAX_EXPECTED_VOLUME_FOR_JUMP_SCALING - (effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED))
             ));
             chicken.vy = MIN_JUMP_STRENGTH + normalizedVolume * (MAX_JUMP_STRENGTH - MIN_JUMP_STRENGTH);
         }
         chicken.worldX += JUMP_FORWARD_SPEED;
-    } else if (soundInfo.volume > baseSoundThreshold) {
+    } else if (soundInfo.volume > effectiveThreshold) {
         // Small sound: Small jump and normal forward movement
         if (wasOnGround) { // Use status from start of frame
             chicken.vy = MIN_JUMP_STRENGTH / 1.5; // Provides a smaller, distinct jump
         }
         chicken.worldX += WALK_SPEED;
     }
-    // If soundInfo.volume <= baseSoundThreshold, no sound-induced horizontal movement or jump initiation.
+    // If soundInfo.volume <= effectiveThreshold, no sound-induced horizontal movement or jump initiation.
 
     const desiredCameraX = chicken.worldX - CAMERA_FOLLOW_X_OFFSET; cameraXRef.current += (desiredCameraX - cameraXRef.current) * 0.1; if (cameraXRef.current < 0) cameraXRef.current = 0;
     const chickenScreenX = chicken.worldX - cameraXRef.current; const chickenRect = { x: chickenScreenX, y: chicken.y, width: chicken.width, height: chicken.height }; let onAnySurface = false;
@@ -280,11 +295,99 @@ export default function ChickenGamePage() {
     const ch = chickenRef.current; const chickenScreenX = ch.worldX - cameraXRef.current; const chickenDrawY = ch.y + ch.bobOffset;
     ctx.fillStyle = COLOR_CHICKEN_BODY; ctx.beginPath(); ctx.ellipse(chickenScreenX + ch.width / 2, chickenDrawY + ch.height / 2, ch.width / 2, ch.height / 2, 0, 0, 2 * Math.PI); ctx.fill(); ctx.fillStyle = COLOR_CHICKEN_COMB; ctx.beginPath(); ctx.ellipse(chickenScreenX + ch.width / 2, chickenDrawY + 5, 10, 8, 0, Math.PI, 2 * Math.PI); ctx.fillRect(chickenScreenX + ch.width / 2 - 5, chickenDrawY + 5, 10, 5); ctx.fill(); ctx.fillStyle = COLOR_CHICKEN_BEAK_LEGS; ctx.beginPath(); ctx.moveTo(chickenScreenX + ch.width, chickenDrawY + ch.height / 2); ctx.lineTo(chickenScreenX + ch.width + 15, chickenDrawY + ch.height / 2 + 5); ctx.lineTo(chickenScreenX + ch.width, chickenDrawY + ch.height / 2 + 10); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#000000'; ctx.beginPath(); ctx.arc(chickenScreenX + ch.width * 0.75, chickenDrawY + ch.height * 0.35, 3, 0, 2 * Math.PI); ctx.fill(); if (chickenDrawY + ch.height < CANVAS_HEIGHT - 50 - 5) { ctx.strokeStyle = COLOR_CHICKEN_BEAK_LEGS; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(chickenScreenX + ch.width * 0.3, chickenDrawY + ch.height); ctx.lineTo(chickenScreenX + ch.width * 0.3, chickenDrawY + ch.height + 10); ctx.moveTo(chickenScreenX + ch.width * 0.6, chickenDrawY + ch.height); ctx.lineTo(chickenScreenX + ch.width * 0.6, chickenDrawY + ch.height + 10); ctx.stroke(); }
     ctx.fillStyle = COLOR_TEXT; ctx.font = '24px Arial'; ctx.textAlign = 'left'; const micX = 20, micY = 30; ctx.fillRect(micX, micY - 10, 10, 20); ctx.beginPath(); ctx.arc(micX + 5, micY - 10, 8, Math.PI, 2 * Math.PI); ctx.fill(); ctx.fillRect(micX + 2, micY + 10, 6, 10); ctx.fillText(`Dist: ${score.toFixed(0)}m`, 70, 40);
+    
+    // Add debug sound info display
+    if (window.lastSoundVolume !== undefined) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(10, CANVAS_HEIGHT - 90, 300, 80);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '16px Arial';
+      ctx.textAlign = 'left';
+      ctx.fillText(`Sound Volume: ${Math.round(window.lastSoundVolume)}`, 20, CANVAS_HEIGHT - 70);
+      ctx.fillText(`Walk Threshold: ${Math.round(window.effectiveThreshold)}`, 20, CANVAS_HEIGHT - 50);
+      ctx.fillText(`Jump Threshold: ${Math.round(window.jumpThreshold)}`, 20, CANVAS_HEIGHT - 30);
+    }
+    
     if (gameState === 'gameOver') { ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT); ctx.fillStyle = COLOR_TEXT; ctx.font = '48px Arial'; ctx.textAlign = 'center'; ctx.fillText('Game Over!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 30); ctx.font = '24px Arial'; ctx.fillText(`Distance: ${score.toFixed(0)}m`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20); ctx.fillText('Click or Say Something to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 60);
     } else if (gameState === 'won') { updateConfetti(); confettiRef.current.forEach(c => { ctx.fillStyle = c.color; ctx.fillRect(c.x, c.y, c.size, c.size); }); ctx.fillStyle = 'rgba(0, 0, 0, 0.3)'; ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT); const trophyX = CANVAS_WIDTH / 2, trophyY = CANVAS_HEIGHT / 2 - 80; const trophyWidth = 80, trophyHeight = 100; ctx.fillStyle = COLOR_TROPHY; ctx.fillRect(trophyX - trophyWidth/2, trophyY + trophyHeight - 20, trophyWidth, 20); ctx.fillRect(trophyX - 10, trophyY + trophyHeight - 40, 20, 20); ctx.beginPath(); ctx.moveTo(trophyX - trophyWidth/2, trophyY + trophyHeight - 40); ctx.quadraticCurveTo(trophyX, trophyY - 20, trophyX + trophyWidth/2, trophyY + trophyHeight - 40); ctx.lineTo(trophyX + trophyWidth/2 - 10, trophyY); ctx.quadraticCurveTo(trophyX, trophyY - 10, trophyX - trophyWidth/2 + 10, trophyY); ctx.closePath(); ctx.fill(); const cuteChickenSize = 40; ctx.fillStyle = COLOR_CHICKEN_BODY; ctx.beginPath(); ctx.arc(trophyX, trophyY - cuteChickenSize/3, cuteChickenSize/2, 0, 2 * Math.PI); ctx.fill(); ctx.fillStyle = COLOR_CHICKEN_COMB; ctx.beginPath(); ctx.arc(trophyX, trophyY - cuteChickenSize/3 - cuteChickenSize/4, cuteChickenSize/5, Math.PI, 2*Math.PI); ctx.fill(); ctx.fillStyle = COLOR_CHICKEN_BEAK_LEGS; ctx.beginPath(); ctx.moveTo(trophyX + cuteChickenSize/2.5, trophyY - cuteChickenSize/3); ctx.lineTo(trophyX + cuteChickenSize/2.5 + 8, trophyY - cuteChickenSize/3 + 3); ctx.lineTo(trophyX + cuteChickenSize/2.5, trophyY - cuteChickenSize/3 + 6); ctx.closePath(); ctx.fill(); ctx.strokeStyle = '#000000'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(trophyX - 8, trophyY - cuteChickenSize/2.8, 4, 0.25*Math.PI, 0.75*Math.PI); ctx.stroke(); ctx.beginPath(); ctx.arc(trophyX + 8, trophyY - cuteChickenSize/2.8, 4, 0.25*Math.PI, 0.75*Math.PI); ctx.stroke(); ctx.fillStyle = COLOR_CHICKEN_BODY; ctx.beginPath(); ctx.ellipse(trophyX - cuteChickenSize/2, trophyY - cuteChickenSize/6, cuteChickenSize/3, cuteChickenSize/4, -0.3*Math.PI, 0, 2*Math.PI); ctx.fill(); ctx.beginPath(); ctx.ellipse(trophyX + cuteChickenSize/2, trophyY - cuteChickenSize/6, cuteChickenSize/3, cuteChickenSize/4, 0.3*Math.PI, 0, 2*Math.PI); ctx.fill(); ctx.fillStyle = COLOR_TEXT; ctx.font = '48px Arial'; ctx.textAlign = 'center'; ctx.fillText('You Won!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 50); ctx.font = '24px Arial'; ctx.fillText(`Final Distance: ${score.toFixed(0)}m`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 90); ctx.fillText('Click or Say Something to Play Again', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 130);
     } else if (gameState === 'ready') { ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT); ctx.fillStyle = COLOR_TEXT; ctx.font = '30px Arial'; ctx.textAlign = 'center'; if (isMicrophoneAllowed === null) { ctx.fillText('Requesting microphone...', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2); } else if (isMicrophoneAllowed === false) { ctx.fillText('Mic denied. Click/Space for small jump.', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2); } else { ctx.fillText('Make Sounds to Move & Jump!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 15); ctx.fillText('Click or Say Loudly to Start.', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 25);} }
   }, [gameState, score, isMicrophoneAllowed, updateConfetti, cameraXRef]);
 
+  // Function to connect audio file to the analyser
+  const connectAudioFile = useCallback((file) => {
+    if (!file) return;
+    
+    // Create new AudioContext if needed
+    if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    
+    // Create audio element if it doesn't exist
+    if (!audioElementRef.current) {
+      const audioEl = document.createElement('audio');
+      audioEl.controls = true;
+      audioElementRef.current = audioEl;
+      document.getElementById('audioFileContainer').appendChild(audioEl);
+    }
+    
+    // Set up file as source
+    const audioEl = audioElementRef.current;
+    const objectURL = URL.createObjectURL(file);
+    audioEl.src = objectURL;
+    
+    // Clean up previous connections
+    if (audioFileSourceRef.current) {
+      audioFileSourceRef.current.disconnect();
+    }
+    
+    // Create analyser if needed
+    if (!analyserRef.current) {
+      const analyser = audioContextRef.current.createAnalyser();
+      analyser.smoothingTimeConstant = SMOOTHING_TIME_CONSTANT;
+      analyser.fftSize = 256;
+      analyserRef.current = analyser;
+      dataArrayRef.current = new Uint8Array(analyser.frequencyBinCount);
+    }
+    
+    // Connect audio element to analyser
+    audioFileSourceRef.current = audioContextRef.current.createMediaElementSource(audioEl);
+    audioFileSourceRef.current.connect(analyserRef.current);
+    analyserRef.current.connect(audioContextRef.current.destination);
+    
+    // Switch to using audio file
+    setUseAudioFile(true);
+    
+    // Resume audio context if needed
+    if (audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume();
+    }
+  }, []);
+
+  // Handle file selection
+  const handleFileSelect = useCallback((e) => {
+    const file = e.target.files[0];
+    if (file && file.type.includes('audio')) {
+      connectAudioFile(file);
+    }
+  }, [connectAudioFile]);
+
+  // Toggle between mic and audio file
+  const toggleAudioSource = useCallback(() => {
+    if (useAudioFile) {
+      // Switch back to microphone
+      if (audioFileSourceRef.current) {
+        audioFileSourceRef.current.disconnect();
+      }
+      
+      if (analyserRef.current) {
+        analyserRef.current.disconnect();
+      }
+      
+      // Re-init microphone
+      initAudio();
+      setUseAudioFile(false);
+    }
+  }, [useAudioFile, initAudio]);
 
   // Initial Setup Effect
   useEffect(() => {
@@ -352,24 +455,50 @@ export default function ChickenGamePage() {
       <h1 className="text-3xl font-bold text-white mb-2">Chicken Voice Mover</h1>
       <div className="my-3 p-3 bg-gray-700 rounded-lg shadow">
         <label htmlFor="sensitivity" className="block text-sm font-medium text-gray-200 mb-1">
-          Sound Sensitivity (Threshold: {baseSoundThreshold.toFixed(0)})
+          Sound Sensitivity (Value: {baseSoundThreshold.toFixed(0)})
         </label>
         <input type="range" id="sensitivity" name="sensitivity" min="5" max="100" value={baseSoundThreshold}
           onChange={handleSensitivityChange} className="w-full h-2 bg-gray-500 rounded-lg appearance-none cursor-pointer"
           disabled={gameState === 'playing'} />
         <div className="flex justify-between text-xs text-gray-400 px-1">
-            <span>Softer Sounds Move/Jump</span>
-            <span>Loud Sounds Move/Jump Higher</span>
+            <span>Less Sensitive</span>
+            <span>More Sensitive</span>
         </div>
       </div>
+      
+      {/* Audio file input for testing */}
+      <div className="my-3 p-3 bg-gray-700 rounded-lg shadow w-full max-w-lg">
+        <h3 className="text-white font-medium mb-2">Test with Audio File</h3>
+        <div className="flex flex-col gap-2">
+          <input 
+            type="file" 
+            accept="audio/*" 
+            onChange={handleFileSelect} 
+            className="text-gray-200 text-sm"
+            disabled={gameState === 'playing'}
+          />
+          <div id="audioFileContainer" className="flex flex-col items-center mt-2"></div>
+          {useAudioFile && (
+            <button 
+              onClick={toggleAudioSource}
+              className="mt-2 bg-blue-500 hover:bg-blue-600 text-white py-1 px-2 rounded"
+              disabled={gameState === 'playing'}
+            >
+              Switch Back to Microphone
+            </button>
+          )}
+        </div>
+      </div>
+      
       <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT}
         className="border-4 border-gray-600 rounded-lg shadow-2xl bg-white"
         onClick={handleCanvasClick} />
-      {isMicrophoneAllowed === false && gameState !== 'loading' && (
+      {isMicrophoneAllowed === false && gameState !== 'loading' && !useAudioFile && (
         <p className="text-red-400 mt-4"> Mic access denied. Space/Click for small jump (no forward move).</p>
       )}
       <p className="text-gray-300 mt-2 text-sm">
         { gameState === 'loading' ? 'Loading...' :
+          useAudioFile ? 'Using audio file input. Play the file to move the bird!' :
           (gameState === 'ready' && isMicrophoneAllowed === null) ? 'Waiting for microphone permission...' :
           (isMicrophoneAllowed && gameState !== 'playing') ? 'Make soft sounds to walk, loud to jump & move! Click/Say Loudly to Start.' :
           isMicrophoneAllowed ? 'Make soft sounds to walk, loud sounds to jump further & higher!' :
