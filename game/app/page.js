@@ -48,11 +48,13 @@ export default function ChickenGamePage() {
   const analyserRef = useRef(null);
   const microphoneStreamRef = useRef(null);
   const dataArrayRef = useRef(null);
+  const audioSourceRef = useRef(null); // Add a ref for the audio source
 
   const [gameState, setGameState] = useState('loading');
   const [score, setScore] = useState(0);
   const [isMicrophoneAllowed, setIsMicrophoneAllowed] = useState(null);
   const [soundThreshold, setSoundThreshold] = useState(30); // Initial sensitivity
+  const [audioActive, setAudioActive] = useState(false); // Track audio state
 
   const chickenRef = useRef({
     x: CHICKEN_INITIAL_X, // Add X position for horizontal movement
@@ -130,43 +132,156 @@ export default function ChickenGamePage() {
   }, []);
 
   const initAudio = useCallback(async () => {
-    if (audioContextRef.current) return;
+    console.log("Initializing audio...");
+    // Clean up any existing audio resources first
+    if (audioContextRef.current) {
+      try {
+        if (audioSourceRef.current) {
+          audioSourceRef.current.disconnect();
+          audioSourceRef.current = null;
+        }
+        await audioContextRef.current.close();
+        audioContextRef.current = null;
+      } catch (e) {
+        console.error("Error cleaning up audio context:", e);
+      }
+    }
+
+    if (microphoneStreamRef.current) {
+      microphoneStreamRef.current.getTracks().forEach(track => track.stop());
+      microphoneStreamRef.current = null;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log("Requesting microphone access...");
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: false,
+          autoGainControl: false,
+          noiseSuppression: false,
+          latency: 0
+        } 
+      });
+      console.log("Microphone access granted!");
       microphoneStreamRef.current = stream;
+      
+      // Create a new audio context
       const context = new (window.AudioContext || window.webkitAudioContext)();
       audioContextRef.current = context;
+      console.log("Audio context created, state:", context.state);
+      
+      // Create and configure analyzer
       const analyser = context.createAnalyser();
       analyserRef.current = analyser;
       analyser.smoothingTimeConstant = SMOOTHING_TIME_CONSTANT;
       analyser.fftSize = 256;
+      
+      // Create source from microphone stream
       const source = context.createMediaStreamSource(stream);
+      audioSourceRef.current = source; // Store reference to source
       source.connect(analyser);
+      
+      // Create data array for frequency analysis
       dataArrayRef.current = new Uint8Array(analyser.frequencyBinCount);
+      
+      // Attempt to resume context immediately
+      if (context.state === 'suspended') {
+        await context.resume();
+        console.log("Audio context resumed, state:", context.state);
+      }
+      
+      // Setup state change handler
+      context.onstatechange = async () => {
+        console.log("Audio context state changed to:", context.state);
+        if (context.state === 'suspended') {
+          try {
+            await context.resume();
+            console.log("Audio context resumed after state change, new state:", context.state);
+          } catch (e) {
+            console.error("Failed to resume after state change:", e);
+          }
+        }
+        setAudioActive(context.state === 'running');
+      };
+      
+      setAudioActive(context.state === 'running');
       setIsMicrophoneAllowed(true);
+      console.log("Audio initialization complete!");
     } catch (err) {
       console.error("Error accessing microphone:", err);
       setIsMicrophoneAllowed(false);
+      setAudioActive(false);
     }
+    
     setGameState('ready');
-  }, [setIsMicrophoneAllowed, setGameState]); // Dependencies are stable state setters
+  }, [setIsMicrophoneAllowed, setGameState, setAudioActive]);
 
-  // Now returns an object: { detected: boolean, volume: number }
+  // Modified to be more robust in checking audio state
   const getSoundInfo = useCallback(() => {
     if (!analyserRef.current || !dataArrayRef.current || dataArrayRef.current.length === 0) {
+      console.log("Analyzer or data array not available");
       return { detected: false, volume: 0 };
     }
-    analyserRef.current.getByteFrequencyData(dataArrayRef.current);
-    let sum = 0;
-    for (let i = 0; i < dataArrayRef.current.length; i++) {
-      sum += dataArrayRef.current[i];
+    
+    // Check and ensure audio context is running
+    if (audioContextRef.current) {
+      if (audioContextRef.current.state === 'suspended') {
+        console.log("Audio context suspended during getSoundInfo, attempting to resume...");
+        audioContextRef.current.resume()
+          .then(() => {
+            console.log("Audio context resumed successfully, state:", audioContextRef.current.state);
+            setAudioActive(true);
+          })
+          .catch(e => {
+            console.error("Failed to resume audio context:", e);
+            setAudioActive(false);
+          });
+        return { detected: false, volume: 0 };
+      } 
+      else if (audioContextRef.current.state !== 'running') {
+        console.log("Audio context in unexpected state:", audioContextRef.current.state);
+        setAudioActive(false);
+        return { detected: false, volume: 0 };
+      }
+    } else {
+      console.log("Audio context not available");
+      return { detected: false, volume: 0 };
     }
-    const averageVolume = sum / dataArrayRef.current.length;
-    return {
-      detected: averageVolume > soundThreshold, // Use state variable for threshold
-      volume: averageVolume,
-    };
-  }, [soundThreshold]); // Depends on the soundThreshold state
+    
+    // Ensure we're connected
+    if (audioSourceRef.current && !audioActive) {
+      try {
+        audioSourceRef.current.connect(analyserRef.current);
+        console.log("Reconnected audio source to analyzer");
+        setAudioActive(true);
+      } catch (e) {
+        console.error("Failed to reconnect audio source:", e);
+      }
+    }
+    
+    // Get sound data
+    try {
+      analyserRef.current.getByteFrequencyData(dataArrayRef.current);
+      let sum = 0;
+      for (let i = 0; i < dataArrayRef.current.length; i++) {
+        sum += dataArrayRef.current[i];
+      }
+      const averageVolume = sum / dataArrayRef.current.length;
+      
+      // Log volume periodically (every ~2 seconds) to avoid console spam
+      if (Math.random() < 0.01) {
+        console.log("Current volume:", averageVolume, "Threshold:", soundThreshold);
+      }
+      
+      return {
+        detected: averageVolume > soundThreshold,
+        volume: averageVolume,
+      };
+    } catch (e) {
+      console.error("Error getting audio data:", e);
+      return { detected: false, volume: 0 };
+    }
+  }, [soundThreshold, audioActive, setAudioActive]);
 
   const resetGame = useCallback(() => {
     chickenRef.current = {
@@ -194,11 +309,41 @@ export default function ChickenGamePage() {
 
   const startGame = useCallback(() => {
     if (isMicrophoneAllowed === false) {
-        alert("Microphone access was denied or failed. Use Spacebar to jump (fixed height).");
+      alert("Microphone access is required to play! The chicken only moves with sound.");
+      return;
     }
+    
+    // Ensure audio is working before starting
+    if (audioContextRef.current) {
+      if (audioContextRef.current.state === 'suspended') {
+        console.log("Resuming audio context before game start...");
+        audioContextRef.current.resume()
+          .then(() => {
+            console.log("Audio resumed for game start, state:", audioContextRef.current.state);
+            setAudioActive(true);
+            resetGame();
+            setGameState('playing');
+          })
+          .catch(e => {
+            console.error("Failed to resume audio for game start:", e);
+            alert("Could not activate microphone. Please try clicking or tapping the screen once before starting.");
+          });
+        return;
+      }
+    } else {
+      console.log("No audio context before game start, reinitializing...");
+      initAudio().then(() => {
+        console.log("Audio initialized for game start");
+        resetGame();
+        setGameState('playing');
+      });
+      return;
+    }
+    
+    // If we got here, audio should be good to go
     resetGame();
     setGameState('playing');
-  }, [isMicrophoneAllowed, resetGame, setGameState]);
+  }, [isMicrophoneAllowed, resetGame, setGameState, initAudio, setAudioActive]);
 
   const updateGame = useCallback(() => {
     const chicken = chickenRef.current;
@@ -456,67 +601,123 @@ export default function ChickenGamePage() {
     }
   }, [gameState, score, isMicrophoneAllowed, updateConfetti]);
 
+  // Aggressive audio context maintenance
+  useEffect(() => {
+    // Keep checking audio context state
+    const audioCheckInterval = setInterval(() => {
+      if (gameState === 'playing') {
+        if (audioContextRef.current) {
+          if (audioContextRef.current.state === 'suspended') {
+            console.log("Audio suspended during gameplay, resuming...");
+            audioContextRef.current.resume()
+              .then(() => {
+                console.log("Audio resumed during gameplay check");
+                setAudioActive(true);
+              })
+              .catch(e => console.error("Failed to resume during interval check:", e));
+          } else {
+            setAudioActive(audioContextRef.current.state === 'running');
+          }
+          
+          // Periodically check if we've lost the connection and reestablish it
+          if (audioSourceRef.current && analyserRef.current && !audioActive) {
+            try {
+              audioSourceRef.current.connect(analyserRef.current);
+              console.log("Reconnected audio during periodic check");
+              setAudioActive(true);
+            } catch (e) {
+              console.error("Failed to reconnect during periodic check:", e);
+            }
+          }
+        } else if (gameState === 'playing') {
+          // If we somehow lost our audio context during gameplay, try to recreate it
+          console.log("Audio context lost during gameplay, reinitializing...");
+          initAudio();
+        }
+      }
+    }, 500); // Check twice per second
+    
+    return () => clearInterval(audioCheckInterval);
+  }, [gameState, initAudio, audioActive, setAudioActive]);
+  
+  // Initial setup
   useEffect(() => {
     generateLevel();
-    if (isMicrophoneAllowed === null && !audioContextRef.current) { initAudio(); }
+    
+    // Initialize audio on component mount
+    if (isMicrophoneAllowed === null && !audioContextRef.current) {
+      console.log("Initial audio setup on component mount");
+      initAudio();
+    }
+    
+    // Handle key press for game control (not movement)
     const handleKeyPress = (e) => {
-        if (e.code === 'Space') { 
-            if (gameState === 'playing') {
-                // Move forward slightly on spacebar
-                chickenRef.current.x += (MIN_MOVE_DISTANCE + MAX_MOVE_DISTANCE) / 2;
-                
-                // Adjust camera to follow chicken if needed
-                if (chickenRef.current.x - cameraXRef.current > CANVAS_WIDTH / 2) {
-                    cameraXRef.current = chickenRef.current.x - CANVAS_WIDTH / 2;
-                }
-                
-                // Medium jump if on ground
-                if (chickenRef.current.onGround) {
-                    chickenRef.current.vy = (MIN_JUMP_STRENGTH + MAX_JUMP_STRENGTH) / 2;
-                }
-            } else if (gameState === 'ready' || gameState === 'gameOver' || gameState === 'won') {
-                startGame();
-            }
+      if (e.code === 'Space') {
+        if (gameState === 'playing') {
+          // No movement on spacebar - only for testing audio
+          if (!audioActive && audioContextRef.current) {
+            console.log("User interaction, attempting to resume audio...");
+            audioContextRef.current.resume()
+              .then(() => {
+                console.log("Audio resumed via user interaction");
+                setAudioActive(true);
+              })
+              .catch(e => console.error("Failed to resume via user interaction:", e));
+          }
+        } else if (gameState === 'ready' || gameState === 'gameOver' || gameState === 'won') {
+          startGame();
         }
+      }
     };
+    
     window.addEventListener('keydown', handleKeyPress);
-    return () => { /* cleanup ... same ... */
-        window.removeEventListener('keydown', handleKeyPress);
-        if (microphoneStreamRef.current) { microphoneStreamRef.current.getTracks().forEach(track => track.stop()); }
-        if (audioContextRef.current && audioContextRef.current.state !== 'closed') { audioContextRef.current.close().catch(e => console.error("Error closing audio context", e)); audioContextRef.current = null; }
+    
+    // Cleanup function
+    return () => {
+      window.removeEventListener('keydown', handleKeyPress);
+      
+      // Clean up audio resources
+      if (microphoneStreamRef.current) {
+        microphoneStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        if (audioSourceRef.current) {
+          try {
+            audioSourceRef.current.disconnect();
+          } catch (e) {
+            console.error("Error disconnecting audio source:", e);
+          }
+        }
+        
+        audioContextRef.current.close()
+          .catch(e => console.error("Error closing audio context", e));
+      }
     };
   }, [generateLevel, initAudio, startGame, gameState, isMicrophoneAllowed]);
 
-  useEffect(() => {
-    let animationFrameId;
-    const gameLoop = () => {
-      if (gameState === 'playing') { updateGame(); }
-      refinedDraw();
-      animationFrameId = requestAnimationFrame(gameLoop);
-    };
-    animationFrameId = requestAnimationFrame(gameLoop);
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [gameState, updateGame, refinedDraw]);
-
+  // Modified to handle canvas clicks for audio resuming
   const handleCanvasClick = useCallback(() => {
     if (gameState === 'ready' || gameState === 'gameOver' || gameState === 'won') {
-      if (isMicrophoneAllowed === null && !audioContextRef.current) { initAudio(); }
-      else { startGame(); }
-    } else if (gameState === 'playing') {
-      // Move forward slightly on click
-      chickenRef.current.x += (MIN_MOVE_DISTANCE + MAX_MOVE_DISTANCE) / 2;
-      
-      // Adjust camera to follow chicken if needed
-      if (chickenRef.current.x - cameraXRef.current > CANVAS_WIDTH / 2) {
-          cameraXRef.current = chickenRef.current.x - CANVAS_WIDTH / 2;
+      if (isMicrophoneAllowed === null && !audioContextRef.current) {
+        console.log("Canvas click: initializing audio...");
+        initAudio();
+      } else {
+        startGame();
       }
-      
-      // Medium jump if on ground
-      if (chickenRef.current.onGround) {
-          chickenRef.current.vy = (MIN_JUMP_STRENGTH + MAX_JUMP_STRENGTH) / 2;
+    } else if (gameState === 'playing') {
+      // Try to resume audio context on click during gameplay
+      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+        console.log("Canvas click during gameplay: resuming audio...");
+        audioContextRef.current.resume()
+          .then(() => {
+            console.log("Audio resumed via canvas click");
+            setAudioActive(true);
+          })
+          .catch(e => console.error("Failed to resume via canvas click:", e));
       }
     }
-  }, [gameState, isMicrophoneAllowed, initAudio, startGame]);
+  }, [gameState, isMicrophoneAllowed, initAudio, startGame, setAudioActive]);
 
   const handleSensitivityChange = (event) => {
     setSoundThreshold(parseFloat(event.target.value));
@@ -535,17 +736,23 @@ export default function ChickenGamePage() {
           type="range"
           id="sensitivity"
           name="sensitivity"
-          min="5" // Min threshold
-          max="100" // Max threshold
+          min="5" 
+          max="100" 
           value={soundThreshold}
           onChange={handleSensitivityChange}
           className="w-full h-2 bg-gray-500 rounded-lg appearance-none cursor-pointer"
-          disabled={gameState === 'playing'} // Optionally disable during gameplay
+          disabled={gameState === 'playing'} 
         />
         <div className="flex justify-between text-xs text-gray-400 px-1">
             <span>More Sensitive</span>
             <span>Less Sensitive</span>
         </div>
+      </div>
+
+      {/* Audio status indicator */}
+      <div className={`px-3 py-1 mb-2 rounded text-white text-sm ${audioActive ? 'bg-green-600' : 'bg-red-600'}`}>
+        Microphone: {audioActive ? 'Active' : 'Inactive'} 
+        {!audioActive && gameState === 'playing' && ' - Tap screen to activate'}
       </div>
 
       <canvas
@@ -558,7 +765,7 @@ export default function ChickenGamePage() {
       
       {isMicrophoneAllowed === false && gameState !== 'loading' && (
         <p className="text-red-400 mt-4">
-          Microphone access was denied or failed. You can use SPACEBAR/Click to move and jump.
+          Microphone access is required to play! The chicken only moves with sound.
         </p>
       )}
       <p className="text-gray-300 mt-2 text-sm">
@@ -566,7 +773,7 @@ export default function ChickenGamePage() {
           (gameState === 'ready' && isMicrophoneAllowed === null) ? 'Waiting for microphone permission...' :
           (isMicrophoneAllowed && gameState !== 'playing') ? 'Make sounds to move forward! Louder sounds = move faster and jump higher!' :
           isMicrophoneAllowed ? 'Make sounds to move forward! Soft sounds move a little, loud sounds move further and jump higher!' :
-          'Click/Space to move forward and jump. (Mic not available)'}
+          'Microphone required! The chicken only moves with sound.'}
       </p>
        <p className="text-xs text-gray-500 mt-1">Game inspired by TikTok video. Art and mechanics are approximations.</p>
     </div>
