@@ -215,14 +215,20 @@ export default function ChickenGamePage() {
     console.log("Game state set to playing.");
   }, [ensureAudioContextRunning, isMicrophoneAllowed, resetGame, setGameState]);
 
-  const updateGame = useCallback(() => { /* ... same, ensure getSoundInfo is called ... */
-    const chicken = chickenRef.current; chicken.vy += GRAVITY; chicken.y += chicken.vy; chicken.onGround = false;
+  const updateGame = useCallback(() => {
+    const chicken = chickenRef.current;
+    const wasOnGround = chicken.onGround; // Capture status from previous frame before it's reset
+
+    chicken.vy += GRAVITY;
+    chicken.y += chicken.vy;
+    chicken.onGround = false; // Assume airborne for current frame's collision detection
+
     const soundInfo = getSoundInfo();
 
     // Player movement and jump based on sound volume
     if (soundInfo.volume > baseSoundThreshold + JUMP_ACTIVATION_VOLUME_OFFSET) {
         // High sound: Scaled jump and faster forward movement
-        if (chicken.onGround) {
+        if (wasOnGround) { // Use status from start of frame
             const normalizedVolume = Math.min(1, Math.max(0,
                 (soundInfo.volume - (baseSoundThreshold + JUMP_ACTIVATION_VOLUME_OFFSET)) /
                 (MAX_EXPECTED_VOLUME_FOR_JUMP_SCALING - (baseSoundThreshold + JUMP_ACTIVATION_VOLUME_OFFSET))
@@ -232,7 +238,7 @@ export default function ChickenGamePage() {
         chicken.worldX += JUMP_FORWARD_SPEED;
     } else if (soundInfo.volume > baseSoundThreshold) {
         // Small sound: Small jump and normal forward movement
-        if (chicken.onGround) {
+        if (wasOnGround) { // Use status from start of frame
             chicken.vy = MIN_JUMP_STRENGTH / 1.5; // Provides a smaller, distinct jump
         }
         chicken.worldX += WALK_SPEED;
