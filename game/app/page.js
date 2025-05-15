@@ -525,7 +525,7 @@ export default function ChickenGamePage() {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-800 p-4">
       <h1 className="text-3xl font-bold text-white mb-2">Chicken Voice Run</h1>
-      <h3 className="text-xl text-yellow-300 mb-1">"OMG! Jeg klarte det på første forsøket 🥰😍 så lett!!"</h3>
+      <h3 className="text-xl text-yellow-300 mb-1">{'OMG! Jeg klarte det på første forsøket 🥰😍 så lett!!'}</h3>
       
       <div className="my-3 p-3 bg-gray-700 rounded-lg shadow">
         <label htmlFor="sensitivity" className="block text-sm font-medium text-gray-200 mb-1">
@@ -543,8 +543,8 @@ export default function ChickenGamePage() {
           disabled={gameState === 'playing'} // Optionally disable during gameplay
         />
         <div className="flex justify-between text-xs text-gray-400 px-1">
-            <span>Softer Sounds Jump</span>
-            <span>Louder Sounds Jump</span>
+            <span>More Sensitive</span>
+            <span>Less Sensitive</span>
         </div>
       </div>
 
@@ -555,18 +555,18 @@ export default function ChickenGamePage() {
         className="border-4 border-gray-600 rounded-lg shadow-2xl bg-white"
         onClick={handleCanvasClick}
       />
-      {/* ... messages ... */}
+      
       {isMicrophoneAllowed === false && gameState !== 'loading' && (
         <p className="text-red-400 mt-4">
-          Microphone access was denied or failed. You can use SPACEBAR/Click for a medium jump.
+          Microphone access was denied or failed. You can use SPACEBAR/Click to move and jump.
         </p>
       )}
       <p className="text-gray-300 mt-2 text-sm">
         { gameState === 'loading' ? 'Loading...' :
           (gameState === 'ready' && isMicrophoneAllowed === null) ? 'Waiting for microphone permission...' :
-          (isMicrophoneAllowed && gameState !== 'playing') ? 'Modulate your voice to control jump height! Click or Say Loudly to Start.' :
-          isMicrophoneAllowed ? 'Modulate your voice to control jump height!' :
-          'Click/Space for medium jump. (Mic not available)'}
+          (isMicrophoneAllowed && gameState !== 'playing') ? 'Make sounds to move forward! Louder sounds = move faster and jump higher!' :
+          isMicrophoneAllowed ? 'Make sounds to move forward! Soft sounds move a little, loud sounds move further and jump higher!' :
+          'Click/Space to move forward and jump. (Mic not available)'}
       </p>
        <p className="text-xs text-gray-500 mt-1">Game inspired by TikTok video. Art and mechanics are approximations.</p>
     </div>
