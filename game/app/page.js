@@ -33,6 +33,11 @@ const FINISH_LINE_COLOR_PRIMARY = '#000000';
 const FINISH_LINE_COLOR_SECONDARY = '#FFFFFF';
 const SMOOTHING_TIME_CONSTANT = 0.2;
 
+// New colors for lushness
+const COLOR_SKY_TOP = '#70A1FF'; // Lighter blue for top of sky gradient
+const COLOR_SKY_BOTTOM = '#3366CC'; // Darker blue for bottom of sky gradient (original was #333366)
+const COLOR_DISTANT_HILL_1 = '#6AAA64'; // Muted green for far hills
+const COLOR_DISTANT_HILL_2 = '#5C9A58'; // Slightly darker muted green
 
 export default function ChickenGamePage() {
   const canvasRef = useRef(null);
@@ -48,6 +53,7 @@ export default function ChickenGamePage() {
   const [isMicrophoneAllowed, setIsMicrophoneAllowed] = useState(null);
   const [baseSoundThreshold, setBaseSoundThreshold] = useState(30);
   const [useAudioFile, setUseAudioFile] = useState(false);
+  const [isDebugMode, setIsDebugMode] = useState(false);
 
   const chickenRef = useRef({
     worldX: CHICKEN_INITIAL_WORLD_X, y: CANVAS_HEIGHT - 100 - CHICKEN_HEIGHT,
@@ -55,7 +61,8 @@ export default function ChickenGamePage() {
     onGround: true, bobOffset: 0, bobDirection: 1,
     wingPhase: 0, // For wing/tail animation
     legPhase: 0,  // For leg animation
-    lastMoveX: 0 // To detect horizontal movement
+    lastMoveX: 0, // To detect horizontal movement
+    debugVx: 0 // Horizontal velocity for debug mode
   });
   const cameraXRef = useRef(0);
   const levelElementsRef = useRef([]);
@@ -137,41 +144,87 @@ export default function ChickenGamePage() {
 
   const generateLevel = useCallback(() => {
     const elements = []; let currentX = 0;
+    // Start: Initial platform
     elements.push({ type: 'platform', id: `p0`, x: currentX, y: CANVAS_HEIGHT - 100, width: CHICKEN_INITIAL_WORLD_X + 300, height: 100 });
     currentX += CHICKEN_INITIAL_WORLD_X + 300;
+
+    // Gap and platform with spike
     elements.push({ type: 'gap', id: `g0`, width: 120 }); currentX += 120;
     elements.push({ type: 'platform', id: `p1`, x: currentX, y: CANVAS_HEIGHT - 100, width: 250, height: 100, hasSpike: true, spikeRelativeX: 100 });
     currentX += 250;
+
+    // Gap and slightly higher platform
     elements.push({ type: 'gap', id: `g1`, width: 100 }); currentX += 100;
     elements.push({ type: 'platform', id: `p2`, x: currentX, y: CANVAS_HEIGHT - 150, width: 200, height: 150 });
     currentX += 200;
-    elements.push({ type: 'gap', id: `g2`, width: 150 }); currentX += 150;
+
+    // Gap and another platform at standard height
+    elements.push({ type: 'gap', id: `g2`, width: 120 }); currentX += 120; // Slightly reduced gap from 150
     elements.push({ type: 'platform', id: `p3`, x: currentX, y: CANVAS_HEIGHT - 100, width: 300, height: 100 });
     currentX += 300;
-    elements.push({ type: 'gap', id: `g3`, width: 80 }); currentX += 80;
-    elements.push({ type: 'platform', id: `p4`, x: currentX, y: CANVAS_HEIGHT - 250, width: 80, height: 250 });
+
+    // Gap and a TALLER platform (p4). Make this jump achievable.
+    // Previous platform p3 is at y = CANVAS_HEIGHT - 100.
+    // p4 is at y = CANVAS_HEIGHT - 250 (150px higher).
+    elements.push({ type: 'gap', id: `g3`, width: 70 }); currentX += 70; // Reduced gap from 80
+    elements.push({ type: 'platform', id: `p4`, x: currentX, y: CANVAS_HEIGHT - 220, width: 80, height: 220 }); // Made p4 slightly lower (less high) and thus taller
     currentX += 80;
-    elements.push({ type: 'gap', id: `g4`, width: 180 }); currentX += 180;
+
+    // Gap and another TALL platform (p5). Jump from p4 to p5.
+    // p4 is at y = CANVAS_HEIGHT - 220.
+    // p5 is at y = CANVAS_HEIGHT - 200 (20px lower than p4).
+    elements.push({ type: 'gap', id: `g4`, width: 120 }); currentX += 120; // Reduced gap from 180 significantly
     elements.push({ type: 'platform', id: `p5`, x: currentX, y: CANVAS_HEIGHT - 200, width: 80, height: 200 });
     currentX += 80;
+
+    // Gap and a long platform with shuriken spawn
     elements.push({ type: 'gap', id: `g5`, width: 100 }); currentX += 100;
     elements.push({ type: 'platform', id: `p6`, x: currentX, y: CANVAS_HEIGHT - 100, width: 400, height: 100 });
-    elements.push({ type: 'shuriken_spawn', id: `s0`, x: currentX + 200, spawned: false });
+    elements.push({ type: 'shuriken_spawn', id: `s0`, x: currentX + 150, spawned: false }); // Earlier spawn
+    elements.push({ type: 'shuriken_spawn', id: `s1`, x: currentX + 300, spawned: false }); // Second spawn on same platform
     currentX += 400;
+
+    // Gap, warning, and platform before bridge
     elements.push({ type: 'gap', id: `g6`, width: 100 }); currentX += 100;
     elements.push({ type: 'warning_sign', id: `ws0`, x: currentX, y: CANVAS_HEIGHT - 300 });
     elements.push({ type: 'platform', id: `p7`, x: currentX, y: CANVAS_HEIGHT - 100, width: 150, height: 100 });
+    elements.push({ type: 'shuriken_spawn', id: `s2`, x: currentX + 75, yOffset: -80, spawned: false }); // Shuriken above this platform
     currentX += 150;
+
+    // Gap and bridge
     elements.push({ type: 'gap', id: `g7`, width: 80 }); currentX += 80;
     const bridgeStartX = currentX;
     elements.push({ type: 'bridge_post', id: `bp0`, x: bridgeStartX, y: CANVAS_HEIGHT - 200, width: 60, height: 200 });
-    const bridgePlanks = [ { relativeX: 60, yOffset: 0, width: 150, height: 30 }, { relativeX: 60 + 150 + 20, yOffset: 0, width: 150, height: 30 }, { relativeX: 60 + 150 + 20 + 150 + 20, yOffset: 0, width: 150, height: 30 }, ];
-    elements.push({ type: 'bridge_structure', id: `bs0`, x: bridgeStartX, y: CANVAS_HEIGHT - 200, planks: bridgePlanks, activePlanks: 0 });
-    let approxBridgeWidth = 60; bridgePlanks.forEach((plank, index) => { approxBridgeWidth += plank.width; if (index < bridgePlanks.length -1) approxBridgeWidth += 20; });
-    currentX += approxBridgeWidth;
+    
+    // New Falling Bridge
+    const fallingBridgePlanks = [
+        { id: 'fb0-p0', relativeX: 60, yOffset: 0, width: 100, height: 25, state: 'stable', fallTimer: 0, originalY: CANVAS_HEIGHT - 200 },
+        { id: 'fb0-p1', relativeX: 60 + 100 + 15, yOffset: -5, width: 100, height: 25, state: 'stable', fallTimer: 0, originalY: CANVAS_HEIGHT - 200 -5 }, // Slightly offset
+        { id: 'fb0-p2', relativeX: 60 + 100 + 15 + 100 + 15, yOffset: 0, width: 100, height: 25, state: 'stable', fallTimer: 0, originalY: CANVAS_HEIGHT - 200 },
+        { id: 'fb0-p3', relativeX: 60 + 100 + 15 + 100 + 15 + 100 + 15, yOffset: 5, width: 100, height: 25, state: 'stable', fallTimer: 0, originalY: CANVAS_HEIGHT - 200 + 5},
+    ];
+    elements.push({ 
+        type: 'falling_bridge_structure', 
+        id: `fbs0`, 
+        x: bridgeStartX, 
+        // y will be derived from planks originalY
+        planks: fallingBridgePlanks 
+    });
+    let approxFallingBridgeWidth = 60; // for the initial post
+    fallingBridgePlanks.forEach((plank, index) => { 
+        approxFallingBridgeWidth += plank.width; 
+        if (index < fallingBridgePlanks.length -1) approxFallingBridgeWidth += 15; // gap between planks
+    });
+    elements.push({ type: 'shuriken_spawn', id: `s3`, x: bridgeStartX + approxFallingBridgeWidth / 2, yOffset: -120, spawned: false }); // Shuriken above falling bridge middle
+    currentX += approxFallingBridgeWidth;
+    elements.push({ type: 'bridge_post', id: `bp1`, x: currentX -15 , y: CANVAS_HEIGHT - 200, width: 60, height: 200 }); // End post for falling bridge
+    currentX += (60-15); // Account for end post width
+
     elements.push({ type: 'gap', id: `g8`, width: 80 }); currentX += 80;
     elements.push({ type: 'platform', id: `p8`, x: currentX, y: CANVAS_HEIGHT - 100, width: 300, height: 100 });
     currentX += 300;
+
+    // Gap and finish line
     elements.push({ type: 'gap', id: `g9`, width: 100 }); currentX += 100;
     elements.push({ type: 'finish_line', id: `fl0`, x: currentX, y: CANVAS_HEIGHT - 150, width: 50, height: 150 });
     levelElementsRef.current = elements;
@@ -194,7 +247,7 @@ export default function ChickenGamePage() {
         worldX: CHICKEN_INITIAL_WORLD_X, y: CANVAS_HEIGHT - 100 - CHICKEN_HEIGHT,
         vy: 0, width: CHICKEN_WIDTH, height: CHICKEN_HEIGHT,
         onGround: true, bobOffset: 0, bobDirection: 1,
-        wingPhase: 0, legPhase: 0, lastMoveX: 0 // Reset animation phases
+        wingPhase: 0, legPhase: 0, lastMoveX: 0, debugVx: 0 // Reset animation phases and debugVx
     };
     cameraXRef.current = 0; setScore(0); confettiRef.current = [];
     bridgeStateRef.current = { playerOnBridgePost: false, activePlanks: 0 };
@@ -236,21 +289,32 @@ export default function ChickenGamePage() {
     window.effectiveThreshold = effectiveThreshold;
     window.jumpThreshold = effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED;
 
+    if (isDebugMode) {
+        // Apply debug horizontal movement
+        if (chicken.debugVx !== 0) {
+            chicken.worldX += chicken.debugVx;
+            // chicken.debugVx = 0; // Uncomment if you want press-once movement, keep commented for continuous movement while key is held (requires keyup to stop)
+        }
+    }
 
-    if (soundInfo.volume > effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED) {
-        if (wasOnGround) {
-            const normalizedVolume = Math.min(1, Math.max(0,
-                (soundInfo.volume - (effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED)) /
-                (MAX_EXPECTED_VOLUME_FOR_JUMP_SCALING - (effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED))
-            ));
-            chicken.vy = MIN_JUMP_STRENGTH + normalizedVolume * (MAX_JUMP_STRENGTH - MIN_JUMP_STRENGTH);
-        }
-        chicken.worldX += JUMP_FORWARD_SPEED;
-    } else if (soundInfo.volume > effectiveThreshold) {
-        if (wasOnGround) {
-            chicken.vy = MIN_JUMP_STRENGTH / 1.5;
-        }
-        chicken.worldX += WALK_SPEED;
+    // Regular sound-based movement (only if not in debug mode or no debug input)
+    // This logic might need adjustment if debug arrow keys should *override* sound input temporarily
+    if (!isDebugMode || (chicken.debugVx === 0 && !soundInfo.detected)) { 
+      if (soundInfo.volume > effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED) {
+          if (wasOnGround) {
+              const normalizedVolume = Math.min(1, Math.max(0,
+                  (soundInfo.volume - (effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED)) /
+                  (MAX_EXPECTED_VOLUME_FOR_JUMP_SCALING - (effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED))
+              ));
+              chicken.vy = MIN_JUMP_STRENGTH + normalizedVolume * (MAX_JUMP_STRENGTH - MIN_JUMP_STRENGTH);
+          }
+          chicken.worldX += JUMP_FORWARD_SPEED;
+      } else if (soundInfo.volume > effectiveThreshold) {
+          if (wasOnGround) {
+              chicken.vy = MIN_JUMP_STRENGTH / 1.5;
+          }
+          chicken.worldX += WALK_SPEED;
+      }
     }
 
     // Update animation phases
@@ -282,8 +346,11 @@ export default function ChickenGamePage() {
     const chickenRect = { x: chickenScreenX_collision, y: chicken.y, width: chicken.width, height: chicken.height };
     let onAnySurface = false;
 
-    levelElementsRef.current.forEach(element => {
+    // Iterate backwards for safe removal/modification of planks within falling_bridge_structure
+    for (let i = levelElementsRef.current.length - 1; i >= 0; i--) {
+        const element = levelElementsRef.current[i];
         const elementScreenX = element.x - cameraXRef.current;
+
         if (element.type === 'platform' || element.type === 'bridge_post' || element.type === 'bridge_plank_active') {
             const elRect = { x: elementScreenX, y: element.y, width: element.width, height: element.height };
             if (chickenRect.x + chickenRect.width > elRect.x &&
@@ -309,8 +376,11 @@ export default function ChickenGamePage() {
             if (element.x - cameraXRef.current < CANVAS_WIDTH + 100 && element.x - cameraXRef.current > -100) {
                 levelElementsRef.current.push({
                     type: 'shuriken_active', id: `sa-${element.id}-${Date.now()}`,
-                    worldX: element.x + Math.random() * 100 - 50, y: Math.random() * (CANVAS_HEIGHT / 2) + 50,
-                    size: 30, speedX_world: -(WALK_SPEED + 2 + Math.random() * 3), rotation: 0, active: true,
+                    worldX: element.x + Math.random() * 50 - 25, // Less horizontal randomness
+                    y: element.yOffset ? (CANVAS_HEIGHT - 100 + element.yOffset) : (Math.random() * (CANVAS_HEIGHT / 2) + 50), // Use yOffset if provided
+                    size: 30, 
+                    speedX_world: -(WALK_SPEED + 1 + Math.random() * 2), // Slightly slower and more consistent speed
+                    rotation: 0, active: true,
                 });
                 element.spawned = true;
             }
@@ -349,8 +419,60 @@ export default function ChickenGamePage() {
                 spawnConfetti();
             }
         }
+    }
+
+    // Handle falling bridge planks separately after main collision loop for clarity
+    levelElementsRef.current.forEach(element => {
+        if (element.type === 'falling_bridge_structure') {
+            element.planks.forEach(plank => {
+                if (plank.state === 'fallen') return; // Already fallen, do nothing
+
+                const plankWorldX = element.x + plank.relativeX;
+                const plankScreenX = plankWorldX - cameraXRef.current;
+                const plankRect = { x: plankScreenX, y: plank.originalY + plank.yOffset, width: plank.width, height: plank.height };
+
+                // Collision check for falling bridge planks
+                if (plank.state !== 'falling' && // Don't re-collide if already falling from under feet
+                    chickenRect.x + chickenRect.width > plankRect.x &&
+                    chickenRect.x < plankRect.x + plankRect.width &&
+                    chickenRect.y + chickenRect.height > plankRect.y &&
+                    chickenRect.y + chickenRect.height < plankRect.y + Math.max(chicken.vy, 0) + 10 && // Generous vertical check
+                    chicken.vy >= 0) {
+                    
+                    chicken.y = plankRect.y - chickenRect.height;
+                    chicken.vy = 0;
+                    chicken.onGround = true;
+                    onAnySurface = true;
+                    bridgeStateRef.current.playerOnBridgePost = false; // Not on a regular bridge post
+
+                    if (plank.state === 'stable') {
+                        plank.state = 'wiggling';
+                        plank.fallTimer = 30; // Start countdown (e.g., 30 frames = 0.5 sec at 60fps)
+                    }
+                }
+
+                if (plank.state === 'wiggling') {
+                    plank.fallTimer--;
+                    if (plank.fallTimer <= 0) {
+                        plank.state = 'falling';
+                    }
+                }
+
+                if (plank.state === 'falling') {
+                    plank.yOffset += 8; // How fast planks fall
+                    if (plank.originalY + plank.yOffset > CANVAS_HEIGHT) {
+                        plank.state = 'fallen';
+                    }
+                }
+            });
+        }
     });
-    levelElementsRef.current = levelElementsRef.current.filter(el => el.type !== 'shuriken_active' || el.active);
+
+    levelElementsRef.current = levelElementsRef.current.filter(el => {
+        if (el.type === 'shuriken_active') return el.active;
+        // Potentially filter out fallen planks if needed, for now, they just go off-screen
+        return true;
+    });
 
     if (chicken.y + chicken.height > CANVAS_HEIGHT - 50 && gameState !== 'gameOver' && gameState !== 'won') { // Fell into water
         setGameState('gameOver');
@@ -378,28 +500,161 @@ export default function ChickenGamePage() {
     const canvas = canvasRef.current; if (!canvas) return; const ctx = canvas.getContext('2d'); if (!ctx) return;
 
     // Clear canvas and draw background
-    ctx.fillStyle = COLOR_SKY; ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    // Sky Gradient
+    const skyGradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT * 0.8); // Gradient mostly for the sky part
+    skyGradient.addColorStop(0, COLOR_SKY_TOP);
+    skyGradient.addColorStop(1, COLOR_SKY_BOTTOM);
+    ctx.fillStyle = skyGradient;
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Draw distant hills (simple static ones for parallax illusion)
+    const hillY1 = CANVAS_HEIGHT - 150;
+    const hillY2 = CANVAS_HEIGHT - 120;
+    
+    // Hills layer 1 (furthest)
+    ctx.fillStyle = COLOR_DISTANT_HILL_2;
+    ctx.beginPath();
+    ctx.moveTo(-100 - (cameraXRef.current * 0.1) % 200, hillY1 + 20); // Slow parallax for distant hills
+    ctx.quadraticCurveTo(50 - (cameraXRef.current * 0.1) % 200, hillY1 - 30, 200 - (cameraXRef.current * 0.1) % 200, hillY1 + 10);
+    ctx.quadraticCurveTo(350 - (cameraXRef.current * 0.1) % 200, hillY1 + 50, 500 - (cameraXRef.current * 0.1) % 200, hillY1);
+    ctx.quadraticCurveTo(650 - (cameraXRef.current * 0.1) % 200, hillY1 - 40, 800 - (cameraXRef.current * 0.1) % 200, hillY1 + 20);
+    ctx.lineTo(800 - (cameraXRef.current * 0.1) % 200, CANVAS_HEIGHT);
+    ctx.lineTo(-100 - (cameraXRef.current * 0.1) % 200, CANVAS_HEIGHT);
+    ctx.closePath();
+    ctx.fill();
+    
+    // Hills layer 2 (closer)
+    ctx.fillStyle = COLOR_DISTANT_HILL_1;
+    ctx.beginPath();
+    ctx.moveTo(-50 - (cameraXRef.current * 0.2) % 300, hillY2 + 10); // Slightly faster parallax
+    ctx.quadraticCurveTo(100 - (cameraXRef.current * 0.2) % 300, hillY2 - 40, 300 - (cameraXRef.current * 0.2) % 300, hillY2);
+    ctx.quadraticCurveTo(500 - (cameraXRef.current * 0.2) % 300, hillY2 + 40, 700 - (cameraXRef.current * 0.2) % 300, hillY2 - 10);
+    ctx.quadraticCurveTo(900 - (cameraXRef.current * 0.2) % 300, hillY2 - 50, CANVAS_WIDTH + 100 - (cameraXRef.current * 0.2) % 300, hillY2 + 30);
+    ctx.lineTo(CANVAS_WIDTH + 100 - (cameraXRef.current * 0.2) % 300, CANVAS_HEIGHT);
+    ctx.lineTo(-50 - (cameraXRef.current * 0.2) % 300, CANVAS_HEIGHT);
+    ctx.closePath();
+    ctx.fill();
+
+    // Water
     ctx.fillStyle = COLOR_WATER; ctx.fillRect(0, CANVAS_HEIGHT - 50, CANVAS_WIDTH, 50);
+    
+    // Animate Waves
+    const waveSpeed = 0.5; // Adjust for desired speed
+    const waveOffset = (Date.now() / 1000 * waveSpeed * 30) % 60; // 30 is wave segment width, 60 for two full waves before repeat pattern
+
     ctx.fillStyle = COLOR_WAVE;
-    for (let i = 0; i < CANVAS_WIDTH / 30 + 2; i++) { const wavePatternOffset = cameraXRef.current % 30; const waveBaseX = (i * 30 - wavePatternOffset); const waveX = (waveBaseX % (CANVAS_WIDTH + 30)) - ( (waveBaseX < 0 && (CANVAS_WIDTH+30 !==0)) ? (CANVAS_WIDTH+30) : 0); ctx.beginPath(); ctx.moveTo(waveX, CANVAS_HEIGHT - 45); ctx.quadraticCurveTo(waveX + 7.5, CANVAS_HEIGHT - 55, waveX + 15, CANVAS_HEIGHT - 45); ctx.quadraticCurveTo(waveX + 22.5, CANVAS_HEIGHT - 35, waveX + 30, CANVAS_HEIGHT - 45); ctx.fill(); }
+    for (let i = -1; i < CANVAS_WIDTH / 30 + 2; i++) { // Start i from -1 to ensure coverage when offset
+        const waveBaseX = (i * 30 - waveOffset);
+        // Ensure waveX wraps around correctly for a continuous animation
+        const waveX = (waveBaseX % (CANVAS_WIDTH + 60)) - ( (waveBaseX < -60 && (CANVAS_WIDTH+60 !==0)) ? (CANVAS_WIDTH+60) : 0);
+        if (waveX > CANVAS_WIDTH + 30) continue; // Don't draw if way off screen
+
+        ctx.beginPath();
+        ctx.moveTo(waveX, CANVAS_HEIGHT - 45);
+        ctx.quadraticCurveTo(waveX + 7.5, CANVAS_HEIGHT - 55, waveX + 15, CANVAS_HEIGHT - 45);
+        ctx.quadraticCurveTo(waveX + 22.5, CANVAS_HEIGHT - 35, waveX + 30, CANVAS_HEIGHT - 45);
+        ctx.fill();
+    }
+
 
     // Draw level elements (platforms, spikes, etc.)
     levelElementsRef.current.forEach(element => {
         const elementScreenX = element.x - cameraXRef.current;
         // Cull elements not in view
-        if (elementScreenX + (element.width || element.size || 50) < 0 || elementScreenX > CANVAS_WIDTH) {
-            return;
+        if (elementScreenX + (element.width || element.size || 500) < -100 || elementScreenX > CANVAS_WIDTH + 100) { // Increased culling range for falling bridge
+            // For falling bridge, ensure its planks are also checked or culled based on the main element's X
+            if(element.type !== 'falling_bridge_structure') return;
         }
+
         if (element.type === 'platform' || element.type === 'bridge_post' || element.type === 'bridge_plank_active') {
-            ctx.fillStyle = COLOR_PLATFORM_DIRT;
-            ctx.fillRect(elementScreenX, element.y, element.width, element.height);
+            // Dirt part
+            ctx.fillStyle = COLOR_PLATFORM_DIRT; // Base dirt color
+            ctx.fillRect(elementScreenX, element.y + 10, element.width, element.height - 10); // Dirt below grass
+
+            // Add some dirt texture
+            ctx.fillStyle = 'rgba(0,0,0,0.07)'; // Darker speckles for dirt
+            for (let i = 0; i < element.width / 4; i++) {
+                ctx.beginPath();
+                ctx.arc(
+                    elementScreenX + Math.random() * element.width,
+                    element.y + 10 + Math.random() * (element.height - 15),
+                    Math.random() * 2 + 1, // speckle size
+                    0, Math.PI * 2
+                );
+                ctx.fill();
+            }
+            
             if (element.type === 'platform') {
+                const grassHeight = 30; // Increased grass height for a more lush look
+                const topY = element.y;
+
+                // Main grass body (slightly rounded top)
                 ctx.fillStyle = COLOR_PLATFORM_GRASS;
-                ctx.fillRect(elementScreenX, element.y, element.width, 20);
+                ctx.beginPath();
+                ctx.moveTo(elementScreenX, topY + grassHeight); // Bottom-left of grass
+                ctx.lineTo(elementScreenX, topY + 10); // Top-left (straight part)
+                ctx.quadraticCurveTo(elementScreenX + element.width / 2, topY - 5, elementScreenX + element.width, topY + 10); // Rounded top
+                ctx.lineTo(elementScreenX + element.width, topY + grassHeight); // Bottom-right of grass
+                ctx.closePath();
+                ctx.fill();
+
+                // Add some grass blades / texture
+                ctx.strokeStyle = 'rgba(0,0,0,0.25)'; // Darker shade for depth
+                ctx.lineWidth = 1.5;
+                const bladeHeight = 12;
+                const bladeWidth = 4;
+                for (let gx = 0; gx < element.width; gx += 6) {
+                    const bladeLean = (Math.random() - 0.5) * 5;
+                    ctx.beginPath();
+                    ctx.moveTo(elementScreenX + gx - bladeLean, topY + grassHeight - Math.random()*5); // Start slightly within grass body
+                    ctx.quadraticCurveTo(
+                        elementScreenX + gx + bladeWidth / 2, topY + grassHeight - bladeHeight - Math.random() * 5,
+                        elementScreenX + gx + bladeWidth + bladeLean, topY + grassHeight - Math.random()*5
+                    );
+                    ctx.stroke();
+                }
+                // Add a slight highlight to the top edge of the grass
+                ctx.fillStyle = 'rgba(255,255,255,0.15)';
+                ctx.beginPath();
+                ctx.moveTo(elementScreenX + 2, topY + 10);
+                ctx.quadraticCurveTo(elementScreenX + element.width / 2, topY - 3, elementScreenX + element.width - 2, topY + 10);
+                ctx.fill();
+
+
             } else if (element.type === 'bridge_plank_active') {
                 ctx.fillStyle = COLOR_BRIDGE_PLANK;
                 ctx.fillRect(elementScreenX, element.y, element.width, element.height);
+                // Add wood grain texture to bridge planks
+                ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+                ctx.lineWidth = 1;
+                for(let i = 0; i < 3; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(elementScreenX + 5, element.y + element.height/2 + (i-1)*5 + Math.random()*2-1);
+                    ctx.bezierCurveTo(
+                        elementScreenX + element.width * 0.3, element.y + element.height/2 + (i-1)*6 + Math.random()*4-2,
+                        elementScreenX + element.width * 0.7, element.y + element.height/2 + (i-1)*4 + Math.random()*4-2,
+                        elementScreenX + element.width - 5, element.y + element.height/2 + (i-1)*5 + Math.random()*2-1
+                    );
+                    ctx.stroke();
+                }
+            } else if (element.type === 'bridge_post') {
+                // More detailed bridge post
+                ctx.fillStyle = '#654321'; // Darker wood for post
+                ctx.fillRect(elementScreenX, element.y, element.width, element.height);
+                
+                // Highlights and shadows for a rounded look
+                ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                ctx.fillRect(elementScreenX + element.width * 0.1, element.y, element.width*0.3, element.height);
+                ctx.fillStyle = 'rgba(0,0,0,0.1)';
+                ctx.fillRect(elementScreenX + element.width * 0.6, element.y, element.width*0.3, element.height);
+
+                // Top cap
+                ctx.fillStyle = '#503010';
+                ctx.fillRect(elementScreenX - 5, element.y, element.width + 10, 15);
+                ctx.fillStyle = '#654321';
+                ctx.fillRect(elementScreenX - 2, element.y+2, element.width + 4, 11);
             }
+            
             if (element.hasSpike) {
                 const spikeWidth = 30, spikeHeight = 30;
                 const spikeX = elementScreenX + element.spikeRelativeX;
@@ -411,22 +666,36 @@ export default function ChickenGamePage() {
                 ctx.lineTo(spikeX + spikeWidth, spikeY + spikeHeight);
                 ctx.closePath(); ctx.fill();
             }
-        } else if (element.type === 'shuriken_active') {
-            const shurikenScreenX = element.worldX - cameraXRef.current;
-            if (shurikenScreenX + element.size < 0 || shurikenScreenX > CANVAS_WIDTH) return;
-            ctx.save();
-            ctx.translate(shurikenScreenX + element.size / 2, element.y + element.size / 2);
-            ctx.rotate(element.rotation);
-            ctx.fillStyle = '#555555'; ctx.strokeStyle = '#333333'; ctx.lineWidth = 2;
-            const armLength = element.size / 2;
-            ctx.beginPath();
-            for (let j = 0; j < 4; j++) {
-                ctx.moveTo(0,0);
-                ctx.lineTo(armLength * Math.cos(Math.PI/2 * j), armLength * Math.sin(Math.PI/2*j));
-                ctx.lineTo(armLength/2 * Math.cos(Math.PI/2 * j + Math.PI/4), armLength/2 * Math.sin(Math.PI/2*j + Math.PI/4));
-            }
-            ctx.closePath(); ctx.fill(); ctx.stroke();
-            ctx.restore();
+        
+        // Drawing falling bridge planks
+        } else if (element.type === 'falling_bridge_structure') {
+            element.planks.forEach(plank => {
+                if (plank.state === 'fallen') return;
+
+                const plankWorldX = element.x + plank.relativeX;
+                const plankScreenX = plankWorldX - cameraXRef.current;
+
+                if (plankScreenX + plank.width < 0 || plankScreenX > CANVAS_WIDTH) return; // Cull individual planks
+
+                let drawY = plank.originalY + plank.yOffset;
+                let wobbleX = 0;
+                if (plank.state === 'wiggling') {
+                    wobbleX = (Math.sin(Date.now() / 50) * 3); // Adjust for wobble speed/amount
+                }
+
+                ctx.fillStyle = '#8B4513'; // Darker, more unstable looking wood
+                ctx.fillRect(plankScreenX + wobbleX, drawY, plank.width, plank.height);
+                
+                // Simple texture for falling planks
+                ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+                ctx.lineWidth = 0.5;
+                for(let k=0; k < 2; k++){
+                    ctx.beginPath();
+                    ctx.moveTo(plankScreenX + wobbleX + 3, drawY + plank.height/2 + (k*5)-2.5 + Math.random()*1-0.5);
+                    ctx.lineTo(plankScreenX + wobbleX + plank.width - 3, drawY + plank.height/2 + (k*5)-2.5 + Math.random()*1-0.5);
+                    ctx.stroke();
+                }
+            });
         } else if (element.type === 'warning_sign') {
             const signSize = 50;
             ctx.fillStyle = '#FFCC00'; ctx.beginPath();
@@ -866,7 +1135,17 @@ export default function ChickenGamePage() {
         setGameState('ready');
     }
 
-    const handleKeyPress = (e) => {
+    const keyStates = { ArrowLeft: false, ArrowRight: false, ArrowUp: false }; 
+
+    const handleKeyDown = (e) => {
+      if (isDebugMode) {
+        if (e.code === 'ArrowLeft') keyStates.ArrowLeft = true;
+        if (e.code === 'ArrowRight') keyStates.ArrowRight = true;
+        if (e.code === 'ArrowUp' && chickenRef.current.onGround) {
+          chickenRef.current.vy = MAX_JUMP_STRENGTH; // Stronger jump for debug
+          keyStates.ArrowUp = true; // though up is more of an event
+        }
+      }
       if (e.code === 'Space') {
         if (gameState === 'playing' && chickenRef.current.onGround) {
           chickenRef.current.vy = MIN_JUMP_STRENGTH;
@@ -875,9 +1154,43 @@ export default function ChickenGamePage() {
         }
       }
     };
-    window.addEventListener('keydown', handleKeyPress);
+
+    const handleKeyUp = (e) => {
+      if (isDebugMode) {
+        if (e.code === 'ArrowLeft') keyStates.ArrowLeft = false;
+        if (e.code === 'ArrowRight') keyStates.ArrowRight = false;
+        if (e.code === 'ArrowUp') keyStates.ArrowUp = false;
+      }
+    };
+
+    // Apply debug movement based on keyStates in a way that integrates with game loop
+    const applyDebugMovement = () => {
+      if (isDebugMode && gameState === 'playing') {
+        let newDebugVx = 0;
+        if (keyStates.ArrowLeft) newDebugVx -= WALK_SPEED * 1.5; // Faster debug walk
+        if (keyStates.ArrowRight) newDebugVx += WALK_SPEED * 1.5;
+        chickenRef.current.debugVx = newDebugVx;
+      }
+    };
+
+    let animationFrameIdDebug;
+    const debugLoop = () => {
+      applyDebugMovement();
+      animationFrameIdDebug = requestAnimationFrame(debugLoop);
+    };
+    if (isDebugMode) {
+      animationFrameIdDebug = requestAnimationFrame(debugLoop);
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    
     return () => {
-      window.removeEventListener('keydown', handleKeyPress);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      if (animationFrameIdDebug) {
+        cancelAnimationFrame(animationFrameIdDebug);
+      }
       if (microphoneStreamRef.current) {
         microphoneStreamRef.current.getTracks().forEach(track => track.stop());
       }
@@ -887,7 +1200,7 @@ export default function ChickenGamePage() {
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [generateLevel, initAudio, useAudioFile]);
+  }, [generateLevel, initAudio, useAudioFile, isDebugMode, gameState, startGame]);
 
   useEffect(() => {
     let animationFrameId;
@@ -910,6 +1223,10 @@ export default function ChickenGamePage() {
 
   const handleSensitivityChange = (event) => { setBaseSoundThreshold(parseFloat(event.target.value)); };
 
+  const toggleDebugMode = () => {
+    setIsDebugMode(prev => !prev);
+  };
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-800 p-4">
       <h1 className="text-3xl font-bold text-white mb-2">Chicken Voice Mover</h1>
@@ -927,28 +1244,51 @@ export default function ChickenGamePage() {
       </div>
       
       <div className="my-3 p-3 bg-gray-700 rounded-lg shadow w-full max-w-lg">
-        <h3 className="text-white font-medium mb-2">Test with Audio File</h3>
-        <div className="flex flex-col gap-2">
-          <input 
-            type="file" 
-            accept="audio/*" 
-            onChange={handleFileSelect} 
-            className="text-gray-200 text-sm"
+        <div className="flex justify-between items-center mb-2">
+          <h3 className="text-white font-medium">Game Settings</h3>
+          <button 
+            onClick={toggleDebugMode}
+            className={`py-1 px-2 rounded text-sm ${isDebugMode ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'} text-white`}
             disabled={gameState === 'playing'}
-          />
-          <div id="audioFileContainer" className="flex flex-col items-center mt-2">
-             {/* Audio element will be appended here by connectAudioFile */}
-          </div>
-          {useAudioFile && (
-            <button 
-              onClick={toggleAudioSource}
-              className="mt-2 bg-blue-500 hover:bg-blue-600 text-white py-1 px-2 rounded"
-              disabled={gameState === 'playing'}
-            >
-              Switch Back to Microphone
-            </button>
-          )}
+          >
+            {isDebugMode ? 'Disable Debug Controls' : 'Enable Debug Controls'}
+          </button>
         </div>
+
+        {isDebugMode && (
+          <>
+            <h4 className="text-white font-normal text-sm mt-3 mb-1">Test with Audio File (Debug Mode)</h4>
+            <div className="flex flex-col gap-2">
+              <input 
+                type="file" 
+                accept="audio/*" 
+                onChange={handleFileSelect} 
+                className="text-gray-200 text-sm"
+                disabled={gameState === 'playing'}
+              />
+              <div id="audioFileContainer" className="flex flex-col items-center mt-2">
+                 {/* Audio element will be appended here by connectAudioFile */}
+              </div>
+              {useAudioFile && (
+                <button 
+                  onClick={toggleAudioSource}
+                  className="mt-2 bg-blue-500 hover:bg-blue-600 text-white py-1 px-2 rounded"
+                  disabled={gameState === 'playing'}
+                >
+                  Switch Back to Microphone
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-gray-400 mt-2">
+              Debug Controls: Arrow Keys to Move/Jump (Left, Right, Up).
+            </p>
+          </>
+        )}
+        {!isDebugMode && (
+             <p className="text-xs text-gray-400 mt-2">
+                Enable Debug Controls to use arrow keys and audio file input for testing.
+            </p>
+        )}
       </div>
       
       <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT}
