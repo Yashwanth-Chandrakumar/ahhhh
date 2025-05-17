@@ -282,45 +282,48 @@ export default function ChickenGamePage() {
 
     const soundInfo = getSoundInfo();
     const effectiveThreshold = 105 - baseSoundThreshold;
-    // Scale offset: make JUMP_ACTIVATION_VOLUME_OFFSET adapt to current sensitivity
-    const JUMP_ACTIVATION_VOLUME_OFFSET_SCALED = JUMP_ACTIVATION_VOLUME_OFFSET * (effectiveThreshold / 50); // Base sensitivity is 50 for offset of 20
+    const JUMP_ACTIVATION_VOLUME_OFFSET_SCALED = JUMP_ACTIVATION_VOLUME_OFFSET * (effectiveThreshold / 50);
 
     window.lastSoundVolume = soundInfo.volume;
     window.effectiveThreshold = effectiveThreshold;
     window.jumpThreshold = effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED;
 
     if (isDebugMode) {
-        // Apply debug horizontal movement
         if (chicken.debugVx !== 0) {
             chicken.worldX += chicken.debugVx;
-            // chicken.debugVx = 0; // Uncomment if you want press-once movement, keep commented for continuous movement while key is held (requires keyup to stop)
         }
     }
 
-    // Regular sound-based movement (only if not in debug mode or no debug input)
-    // This logic might need adjustment if debug arrow keys should *override* sound input temporarily
-    if (!isDebugMode || (chicken.debugVx === 0 && !soundInfo.detected)) { 
-      if (soundInfo.volume > effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED) {
-          if (wasOnGround) {
-              const normalizedVolume = Math.min(1, Math.max(0,
-                  (soundInfo.volume - (effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED)) /
-                  (MAX_EXPECTED_VOLUME_FOR_JUMP_SCALING - (effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED))
-              ));
-              chicken.vy = MIN_JUMP_STRENGTH + normalizedVolume * (MAX_JUMP_STRENGTH - MIN_JUMP_STRENGTH);
-          }
-          chicken.worldX += JUMP_FORWARD_SPEED;
-      } else if (soundInfo.volume > effectiveThreshold) {
-          if (wasOnGround) {
-              chicken.vy = MIN_JUMP_STRENGTH / 1.5;
-          }
-          chicken.worldX += WALK_SPEED;
-      }
+    // --- Start of Movement Logic ---
+    // Determine horizontal movement and initiate sound-based jumps
+    if (isDebugMode && chicken.debugVx !== 0) {
+        // Case 1: Debug mode AND horizontal arrow keys are active.
+        chicken.worldX += chicken.debugVx;
+    } else {
+        // Case 2: EITHER not in debug mode OR (in debug mode AND no horizontal arrow keys active, i.e. chicken.debugVx === 0).
+        // Sound (from mic or audio file) controls movement.
+        if (soundInfo.volume > effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED) {
+            if (wasOnGround) { // Sound initiates a jump
+                const normalizedVolume = Math.min(1, Math.max(0,
+                    (soundInfo.volume - (effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED)) /
+                    (MAX_EXPECTED_VOLUME_FOR_JUMP_SCALING - (effectiveThreshold + JUMP_ACTIVATION_VOLUME_OFFSET_SCALED))
+                ));
+                chicken.vy = MIN_JUMP_STRENGTH + normalizedVolume * (MAX_JUMP_STRENGTH - MIN_JUMP_STRENGTH);
+            }
+            chicken.worldX += JUMP_FORWARD_SPEED; // Sound-driven forward movement
+        } else if (soundInfo.volume > effectiveThreshold) {
+            if (wasOnGround) { // Sound initiates a small hop for walk
+                chicken.vy = MIN_JUMP_STRENGTH / 1.5;
+            }
+            chicken.worldX += WALK_SPEED; // Sound-driven walk movement
+        }
     }
+    // --- End of Movement Logic ---
 
     // Update animation phases
-    chicken.lastMoveX = chicken.worldX - previousX;
+    chicken.lastMoveX = chicken.worldX - previousX; // This should be after ALL worldX modifications
 
-    let wingFlapSpeed;
+    let wingFlapSpeed; // This is the single, correct declaration
     if (!chicken.onGround) {
         wingFlapSpeed = 0.35; // Faster flap in air
     } else if (Math.abs(chicken.lastMoveX) > 0.1) {
@@ -331,13 +334,10 @@ export default function ChickenGamePage() {
     chicken.wingPhase = (chicken.wingPhase + wingFlapSpeed) % (2 * Math.PI);
 
     if (chicken.onGround && Math.abs(chicken.lastMoveX) > 0.1) {
-      const legStepSpeed = 0.35; // Speed of leg cycle
+      const legStepSpeed = 0.35;
       chicken.legPhase = (chicken.legPhase + legStepSpeed) % (2 * Math.PI);
     }
-    // If !onGround or not moving on ground, legPhase is not advanced here;
-    // drawing logic will use current legPhase or specific poses for dangling.
 
-    // Camera, collision detection, etc. (rest of the function remains the same)
     const desiredCameraX = chicken.worldX - CAMERA_FOLLOW_X_OFFSET;
     cameraXRef.current += (desiredCameraX - cameraXRef.current) * 0.1;
     if (cameraXRef.current < 0) cameraXRef.current = 0;
@@ -346,9 +346,9 @@ export default function ChickenGamePage() {
     const chickenRect = { x: chickenScreenX_collision, y: chicken.y, width: chicken.width, height: chicken.height };
     let onAnySurface = false;
 
-    // Iterate backwards for safe removal/modification of planks within falling_bridge_structure
     for (let i = levelElementsRef.current.length - 1; i >= 0; i--) {
         const element = levelElementsRef.current[i];
+        if (!element) continue; // Should not happen, but good practice
         const elementScreenX = element.x - cameraXRef.current;
 
         if (element.type === 'platform' || element.type === 'bridge_post' || element.type === 'bridge_plank_active') {
@@ -356,7 +356,7 @@ export default function ChickenGamePage() {
             if (chickenRect.x + chickenRect.width > elRect.x &&
                 chickenRect.x < elRect.x + elRect.width &&
                 chickenRect.y + chickenRect.height > elRect.y &&
-                chickenRect.y + chickenRect.height < elRect.y + Math.max(chicken.vy, 0) + 20 && // Generous vertical check for landing
+                chickenRect.y + chickenRect.height < elRect.y + Math.max(chicken.vy, 0) + 20 &&
                 chicken.vy >= 0) {
                 chicken.y = elRect.y - chickenRect.height;
                 chicken.vy = 0;
@@ -369,17 +369,19 @@ export default function ChickenGamePage() {
                 const spikeRect = { x: elRect.x + element.spikeRelativeX, y: elRect.y - 30, width: 30, height: 30 };
                 if (chickenRect.x < spikeRect.x + spikeRect.width && chickenRect.x + chickenRect.width > spikeRect.x &&
                     chickenRect.y < spikeRect.y + spikeRect.height && chickenRect.y + chickenRect.height > spikeRect.y) {
+                    console.log("Game Over: Spike collision with element:", JSON.stringify(element), "Chicken:", JSON.stringify(chickenRect));
                     setGameState('gameOver');
+                    return; // Early exit if game over
                 }
             }
         } else if (element.type === 'shuriken_spawn' && !element.spawned) {
             if (element.x - cameraXRef.current < CANVAS_WIDTH + 100 && element.x - cameraXRef.current > -100) {
                 levelElementsRef.current.push({
                     type: 'shuriken_active', id: `sa-${element.id}-${Date.now()}`,
-                    worldX: element.x + Math.random() * 50 - 25, // Less horizontal randomness
-                    y: element.yOffset ? (CANVAS_HEIGHT - 100 + element.yOffset) : (Math.random() * (CANVAS_HEIGHT / 2) + 50), // Use yOffset if provided
+                    worldX: element.x + Math.random() * 50 - 25,
+                    y: element.yOffset ? (CANVAS_HEIGHT - 100 + element.yOffset) : (Math.random() * (CANVAS_HEIGHT / 2) + 50),
                     size: 30, 
-                    speedX_world: -(WALK_SPEED + 1 + Math.random() * 2), // Slightly slower and more consistent speed
+                    speedX_world: -(WALK_SPEED + 1 + Math.random() * 2),
                     rotation: 0, active: true,
                 });
                 element.spawned = true;
@@ -392,12 +394,14 @@ export default function ChickenGamePage() {
             const shurikenRect = { x: shurikenScreenX, y: element.y, width: element.size, height: element.size };
             if (chickenRect.x < shurikenRect.x + shurikenRect.width && chickenRect.x + chickenRect.width > shurikenRect.x &&
                 chickenRect.y < shurikenRect.y + shurikenRect.height && chickenRect.y + chickenRect.height > shurikenRect.y) {
+                console.log("Game Over: Shuriken collision with element:", JSON.stringify(element), "Chicken:", JSON.stringify(chickenRect));
                 setGameState('gameOver');
+                return; // Early exit
             }
         } else if (element.type === 'bridge_structure') {
             if (bridgeStateRef.current.playerOnBridgePost && element.activePlanks < element.planks.length) {
                 const soundForBridge = getSoundInfo();
-                if (soundForBridge.detected || chicken.onGround) { // Allow bridge building if on post OR making sound
+                if (soundForBridge.detected || chicken.onGround) {
                     const newPlankIndex = element.activePlanks;
                     const plankDef = element.planks[newPlankIndex];
                     const plankId = `bpa-${element.id}-${newPlankIndex}`;
@@ -417,78 +421,76 @@ export default function ChickenGamePage() {
                 chickenRect.y + chickenRect.height > finishRect.y && chickenRect.y < finishRect.y + finishRect.height) {
                 setGameState('won');
                 spawnConfetti();
+                return; // Early exit
             }
         }
+    } // Correct closing brace for the main collision for-loop
+
+    // Handle falling bridge planks separately
+    if (gameState === 'playing') { // Only process if still playing
+        levelElementsRef.current.forEach(element => {
+            if (element.type === 'falling_bridge_structure') {
+                element.planks.forEach(plank => {
+                    if (plank.state === 'fallen') return;
+                    const plankWorldX = element.x + plank.relativeX;
+                    const plankScreenX = plankWorldX - cameraXRef.current;
+                    const plankRect = { x: plankScreenX, y: plank.originalY + plank.yOffset, width: plank.width, height: plank.height };
+
+                    if (plank.state !== 'falling' &&
+                        chickenRect.x + chickenRect.width > plankRect.x &&
+                        chickenRect.x < plankRect.x + plankRect.width &&
+                        chickenRect.y + chickenRect.height > plankRect.y &&
+                        chickenRect.y + chickenRect.height < plankRect.y + Math.max(chicken.vy, 0) + 10 &&
+                        chicken.vy >= 0) {
+                        chicken.y = plankRect.y - chickenRect.height;
+                        chicken.vy = 0;
+                        chicken.onGround = true;
+                        onAnySurface = true;
+                        bridgeStateRef.current.playerOnBridgePost = false;
+                        if (plank.state === 'stable') {
+                            plank.state = 'wiggling';
+                            plank.fallTimer = 30;
+                        }
+                    }
+                    if (plank.state === 'wiggling') {
+                        plank.fallTimer--;
+                        if (plank.fallTimer <= 0) plank.state = 'falling';
+                    }
+                    if (plank.state === 'falling') {
+                        plank.yOffset += 8;
+                        if (plank.originalY + plank.yOffset > CANVAS_HEIGHT) plank.state = 'fallen';
+                    }
+                });
+            }
+        });
     }
-
-    // Handle falling bridge planks separately after main collision loop for clarity
-    levelElementsRef.current.forEach(element => {
-        if (element.type === 'falling_bridge_structure') {
-            element.planks.forEach(plank => {
-                if (plank.state === 'fallen') return; // Already fallen, do nothing
-
-                const plankWorldX = element.x + plank.relativeX;
-                const plankScreenX = plankWorldX - cameraXRef.current;
-                const plankRect = { x: plankScreenX, y: plank.originalY + plank.yOffset, width: plank.width, height: plank.height };
-
-                // Collision check for falling bridge planks
-                if (plank.state !== 'falling' && // Don't re-collide if already falling from under feet
-                    chickenRect.x + chickenRect.width > plankRect.x &&
-                    chickenRect.x < plankRect.x + plankRect.width &&
-                    chickenRect.y + chickenRect.height > plankRect.y &&
-                    chickenRect.y + chickenRect.height < plankRect.y + Math.max(chicken.vy, 0) + 10 && // Generous vertical check
-                    chicken.vy >= 0) {
-                    
-                    chicken.y = plankRect.y - chickenRect.height;
-                    chicken.vy = 0;
-                    chicken.onGround = true;
-                    onAnySurface = true;
-                    bridgeStateRef.current.playerOnBridgePost = false; // Not on a regular bridge post
-
-                    if (plank.state === 'stable') {
-                        plank.state = 'wiggling';
-                        plank.fallTimer = 30; // Start countdown (e.g., 30 frames = 0.5 sec at 60fps)
-                    }
-                }
-
-                if (plank.state === 'wiggling') {
-                    plank.fallTimer--;
-                    if (plank.fallTimer <= 0) {
-                        plank.state = 'falling';
-                    }
-                }
-
-                if (plank.state === 'falling') {
-                    plank.yOffset += 8; // How fast planks fall
-                    if (plank.originalY + plank.yOffset > CANVAS_HEIGHT) {
-                        plank.state = 'fallen';
-                    }
-                }
-            });
-        }
-    });
-
+    
     levelElementsRef.current = levelElementsRef.current.filter(el => {
         if (el.type === 'shuriken_active') return el.active;
-        // Potentially filter out fallen planks if needed, for now, they just go off-screen
         return true;
     });
 
-    if (chicken.y + chicken.height > CANVAS_HEIGHT - 50 && gameState !== 'gameOver' && gameState !== 'won') { // Fell into water
-        setGameState('gameOver');
-    }
-    if (chicken.y > CANVAS_HEIGHT + chicken.height) { // Fell completely off screen
-        setGameState('gameOver');
+    if (gameState === 'playing') { // Check again before these game-over conditions
+        if (chicken.y + chicken.height >= CANVAS_HEIGHT - 50) { // Fell into water (using >=)
+            console.log("Game Over: Fell into water. Chicken y:", chicken.y, "vy:", chicken.vy, "onGround:", chicken.onGround, "Feet at:", chicken.y + chicken.height, "Water line:", CANVAS_HEIGHT - 50);
+            setGameState('gameOver');
+            return;
+        }
+        if (chicken.y > CANVAS_HEIGHT + chicken.height) { // Fell completely off screen
+            console.log("Game Over: Fell completely off screen. Chicken y:", chicken.y, "vy:", chicken.vy, "onGround:", chicken.onGround);
+            setGameState('gameOver');
+            return;
+        }
     }
 
-    if (!onAnySurface && chicken.y < CANVAS_HEIGHT - 50 - chicken.height) { // Check if truly airborne if not touching anything and not in water yet
+    if (!onAnySurface && chicken.y < CANVAS_HEIGHT - 50 - chicken.height) {
         chicken.onGround = false;
     }
 
     if (gameState === 'playing') {
         setScore(chicken.worldX / 100);
     }
-  }, [getSoundInfo, baseSoundThreshold, setGameState, setScore, spawnConfetti, gameState]);
+  }, [getSoundInfo, baseSoundThreshold, setGameState, setScore, spawnConfetti, gameState, isDebugMode]); // Added isDebugMode to dependencies
   // ***** END OF MODIFIED updateGame *****
 
   const updateConfetti = useCallback(() => {
@@ -1167,8 +1169,8 @@ export default function ChickenGamePage() {
     const applyDebugMovement = () => {
       if (isDebugMode && gameState === 'playing') {
         let newDebugVx = 0;
-        if (keyStates.ArrowLeft) newDebugVx -= WALK_SPEED * 1.5; // Faster debug walk
-        if (keyStates.ArrowRight) newDebugVx += WALK_SPEED * 1.5;
+        if (keyStates.ArrowLeft) newDebugVx -= WALK_SPEED * 0.8; // Reduced debug walk speed
+        if (keyStates.ArrowRight) newDebugVx += WALK_SPEED * 0.8; // Reduced debug walk speed
         chickenRef.current.debugVx = newDebugVx;
       }
     };
