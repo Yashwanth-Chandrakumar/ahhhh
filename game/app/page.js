@@ -1,7 +1,7 @@
 // app/page.js
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 // Game Constants (ensure all are defined here as before)
 const CANVAS_WIDTH = 800; /* ... */
@@ -17,6 +17,8 @@ const WALK_SPEED = 3;
 const JUMP_FORWARD_SPEED = 4;
 const JUMP_ACTIVATION_VOLUME_OFFSET = 20;
 const MAX_EXPECTED_VOLUME_FOR_JUMP_SCALING = 100;
+const COIN_SIZE = 30;
+const COIN_VALUE = 10;
 const COLOR_SKY = '#333366';
 const COLOR_WATER = '#0077BE';
 const COLOR_WAVE = '#FFFFFF';
@@ -50,6 +52,7 @@ export default function ChickenGamePage() {
 
   const [gameState, setGameState] = useState('loading');
   const [score, setScore] = useState(0);
+  const [coinScore, setCoinScore] = useState(0);
   const [isMicrophoneAllowed, setIsMicrophoneAllowed] = useState(null);
   const [baseSoundThreshold, setBaseSoundThreshold] = useState(30);
   const [useAudioFile, setUseAudioFile] = useState(false);
@@ -144,30 +147,42 @@ export default function ChickenGamePage() {
 
   const generateLevel = useCallback(() => {
     const elements = []; let currentX = 0;
+    
     // Start: Initial platform
     elements.push({ type: 'platform', id: `p0`, x: currentX, y: CANVAS_HEIGHT - 100, width: CHICKEN_INITIAL_WORLD_X + 300, height: 100 });
-    currentX += CHICKEN_INITIAL_WORLD_X + 300;
+    currentX += CHICKEN_INITIAL_WORLD_X + 150;
+    
+    // Add first coin
+    elements.push({ type: 'coin', id: `c0`, x: currentX, y: CANVAS_HEIGHT - 150, collected: false });
+    currentX += 150;
 
     // Gap and platform with spike
     elements.push({ type: 'gap', id: `g0`, width: 120 }); currentX += 120;
     elements.push({ type: 'platform', id: `p1`, x: currentX, y: CANVAS_HEIGHT - 100, width: 250, height: 100, hasSpike: true, spikeRelativeX: 100 });
+    // Add coin before spike
+    elements.push({ type: 'coin', id: `c1`, x: currentX + 50, y: CANVAS_HEIGHT - 150, collected: false });
     currentX += 250;
 
     // Gap and slightly higher platform
     elements.push({ type: 'gap', id: `g1`, width: 100 }); currentX += 100;
     elements.push({ type: 'platform', id: `p2`, x: currentX, y: CANVAS_HEIGHT - 150, width: 200, height: 150 });
+    // Add coin on higher platform
+    elements.push({ type: 'coin', id: `c2`, x: currentX + 100, y: CANVAS_HEIGHT - 200, collected: false });
     currentX += 200;
 
     // Gap and another platform at standard height
-    elements.push({ type: 'gap', id: `g2`, width: 120 }); currentX += 120; // Slightly reduced gap from 150
+    elements.push({ type: 'gap', id: `g2`, width: 120 }); currentX += 120;
     elements.push({ type: 'platform', id: `p3`, x: currentX, y: CANVAS_HEIGHT - 100, width: 300, height: 100 });
+    // Add two coins spaced out
+    elements.push({ type: 'coin', id: `c3`, x: currentX + 100, y: CANVAS_HEIGHT - 150, collected: false });
+    elements.push({ type: 'coin', id: `c4`, x: currentX + 200, y: CANVAS_HEIGHT - 150, collected: false });
     currentX += 300;
 
-    // Gap and a TALLER platform (p4). Make this jump achievable.
-    // Previous platform p3 is at y = CANVAS_HEIGHT - 100.
-    // p4 is at y = CANVAS_HEIGHT - 250 (150px higher).
-    elements.push({ type: 'gap', id: `g3`, width: 70 }); currentX += 70; // Reduced gap from 80
-    elements.push({ type: 'platform', id: `p4`, x: currentX, y: CANVAS_HEIGHT - 220, width: 80, height: 220 }); // Made p4 slightly lower (less high) and thus taller
+    // Gap and a TALLER platform (p4)
+    elements.push({ type: 'gap', id: `g3`, width: 70 }); currentX += 70;
+    elements.push({ type: 'platform', id: `p4`, x: currentX, y: CANVAS_HEIGHT - 220, width: 80, height: 220 });
+    // Add coin above tall platform
+    elements.push({ type: 'coin', id: `c5`, x: currentX + 40, y: CANVAS_HEIGHT - 270, collected: false });
     currentX += 80;
 
     // Gap and another TALL platform (p5). Jump from p4 to p5.
@@ -175,13 +190,17 @@ export default function ChickenGamePage() {
     // p5 is at y = CANVAS_HEIGHT - 200 (20px lower than p4).
     elements.push({ type: 'gap', id: `g4`, width: 120 }); currentX += 120; // Reduced gap from 180 significantly
     elements.push({ type: 'platform', id: `p5`, x: currentX, y: CANVAS_HEIGHT - 200, width: 80, height: 200 });
+    elements.push({ type: 'coin', id: `c6`, x: currentX + 40, y: CANVAS_HEIGHT - 250, collected: false });
     currentX += 80;
 
     // Gap and a long platform with shuriken spawn
     elements.push({ type: 'gap', id: `g5`, width: 100 }); currentX += 100;
     elements.push({ type: 'platform', id: `p6`, x: currentX, y: CANVAS_HEIGHT - 100, width: 400, height: 100 });
-    elements.push({ type: 'shuriken_spawn', id: `s0`, x: currentX + 150, spawned: false }); // Earlier spawn
-    elements.push({ type: 'shuriken_spawn', id: `s1`, x: currentX + 300, spawned: false }); // Second spawn on same platform
+    elements.push({ type: 'shuriken_spawn', id: `s0`, x: currentX + 150, spawned: false });
+    elements.push({ type: 'shuriken_spawn', id: `s1`, x: currentX + 300, spawned: false });
+    // Add coins to dodge while avoiding shurikens
+    elements.push({ type: 'coin', id: `c7`, x: currentX + 100, y: CANVAS_HEIGHT - 200, collected: false });
+    elements.push({ type: 'coin', id: `c8`, x: currentX + 250, y: CANVAS_HEIGHT - 200, collected: false });
     currentX += 400;
 
     // Gap, warning, and platform before bridge
@@ -249,7 +268,7 @@ export default function ChickenGamePage() {
         onGround: true, bobOffset: 0, bobDirection: 1,
         wingPhase: 0, legPhase: 0, lastMoveX: 0, debugVx: 0 // Reset animation phases and debugVx
     };
-    cameraXRef.current = 0; setScore(0); confettiRef.current = [];
+    cameraXRef.current = 0; setScore(0); setCoinScore(0); confettiRef.current = [];
     bridgeStateRef.current = { playerOnBridgePost: false, activePlanks: 0 };
     generateLevel();
     levelElementsRef.current = levelElementsRef.current.map(el => { if (el.type === 'shuriken_spawn') return { ...el, spawned: false }; if (el.type === 'bridge_structure') return { ...el, activePlanks: 0 }; return el; }).filter(el => el.type !== 'shuriken_active' && el.type !== 'bridge_plank_active');
@@ -377,26 +396,44 @@ export default function ChickenGamePage() {
         } else if (element.type === 'shuriken_spawn' && !element.spawned) {
             if (element.x - cameraXRef.current < CANVAS_WIDTH + 100 && element.x - cameraXRef.current > -100) {
                 levelElementsRef.current.push({
-                    type: 'shuriken_active', id: `sa-${element.id}-${Date.now()}`,
+                    type: 'shuriken_active',
+                    id: `sa-${element.id}-${Date.now()}`,
                     worldX: element.x + Math.random() * 50 - 25,
                     y: element.yOffset ? (CANVAS_HEIGHT - 100 + element.yOffset) : (Math.random() * (CANVAS_HEIGHT / 2) + 50),
-                    size: 30, 
+                    size: 30,
                     speedX_world: -(WALK_SPEED + 1 + Math.random() * 2),
-                    rotation: 0, active: true,
+                    rotation: 0,
+                    active: true
                 });
                 element.spawned = true;
             }
         } else if (element.type === 'shuriken_active') {
+            // Update shuriken physics
             element.worldX += element.speedX_world;
-            const shurikenScreenX = element.worldX - cameraXRef.current;
             element.rotation += 0.2;
-            if (shurikenScreenX + element.size < -50) element.active = false;
-            const shurikenRect = { x: shurikenScreenX, y: element.y, width: element.size, height: element.size };
-            if (chickenRect.x < shurikenRect.x + shurikenRect.width && chickenRect.x + chickenRect.width > shurikenRect.x &&
-                chickenRect.y < shurikenRect.y + shurikenRect.height && chickenRect.y + chickenRect.height > shurikenRect.y) {
-                console.log("Game Over: Shuriken collision with element:", JSON.stringify(element), "Chicken:", JSON.stringify(chickenRect));
+            
+            // Check if shuriken should be deactivated
+            const shurikenScreenX = element.worldX - cameraXRef.current;
+            if (shurikenScreenX + element.size < -50) {
+                element.active = false;
+                continue;
+            }
+
+            // Check collision with chicken
+            const shurikenRect = {
+                x: shurikenScreenX,
+                y: element.y,
+                width: element.size,
+                height: element.size
+            };
+
+            if (chickenRect.x < shurikenRect.x + shurikenRect.width &&
+                chickenRect.x + chickenRect.width > shurikenRect.x &&
+                chickenRect.y < shurikenRect.y + shurikenRect.height &&
+                chickenRect.y + chickenRect.height > shurikenRect.y) {
+                console.log("Game Over: Shuriken collision");
                 setGameState('gameOver');
-                return; // Early exit
+                return;
             }
         } else if (element.type === 'bridge_structure') {
             if (bridgeStateRef.current.playerOnBridgePost && element.activePlanks < element.planks.length) {
@@ -422,6 +459,15 @@ export default function ChickenGamePage() {
                 setGameState('won');
                 spawnConfetti();
                 return; // Early exit
+            }
+        } else if (element.type === 'coin' && !element.collected) {
+            const coinRect = { x: elementScreenX, y: element.y, width: COIN_SIZE, height: COIN_SIZE };
+            if (chickenRect.x < coinRect.x + coinRect.width && chickenRect.x + chickenRect.width > coinRect.x &&
+                chickenRect.y < coinRect.y + coinRect.height && chickenRect.y + chickenRect.height > coinRect.y) {
+                // Coin collection logic
+                element.collected = true;
+                setCoinScore(prev => prev + COIN_VALUE);
+                // Optionally, play a sound or animate the coin
             }
         }
     } // Correct closing brace for the main collision for-loop
@@ -465,23 +511,11 @@ export default function ChickenGamePage() {
         });
     }
     
+    // Clean up inactive shurikens
     levelElementsRef.current = levelElementsRef.current.filter(el => {
         if (el.type === 'shuriken_active') return el.active;
         return true;
     });
-
-    if (gameState === 'playing') { // Check again before these game-over conditions
-        if (chicken.y + chicken.height >= CANVAS_HEIGHT - 50) { // Fell into water (using >=)
-            console.log("Game Over: Fell into water. Chicken y:", chicken.y, "vy:", chicken.vy, "onGround:", chicken.onGround, "Feet at:", chicken.y + chicken.height, "Water line:", CANVAS_HEIGHT - 50);
-            setGameState('gameOver');
-            return;
-        }
-        if (chicken.y > CANVAS_HEIGHT + chicken.height) { // Fell completely off screen
-            console.log("Game Over: Fell completely off screen. Chicken y:", chicken.y, "vy:", chicken.vy, "onGround:", chicken.onGround);
-            setGameState('gameOver');
-            return;
-        }
-    }
 
     if (!onAnySurface && chicken.y < CANVAS_HEIGHT - 50 - chicken.height) {
         chicken.onGround = false;
@@ -562,10 +596,35 @@ export default function ChickenGamePage() {
     // Draw level elements (platforms, spikes, etc.)
     levelElementsRef.current.forEach(element => {
         const elementScreenX = element.x - cameraXRef.current;
-        // Cull elements not in view
-        if (elementScreenX + (element.width || element.size || 500) < -100 || elementScreenX > CANVAS_WIDTH + 100) { // Increased culling range for falling bridge
-            // For falling bridge, ensure its planks are also checked or culled based on the main element's X
-            if(element.type !== 'falling_bridge_structure') return;
+        // Cull elements not in view (except for falling bridge)
+        if (element.type !== 'falling_bridge_structure' && 
+            elementScreenX + (element.width || element.size || 0) < -100 || 
+            elementScreenX > CANVAS_WIDTH + 100) {
+            return;
+        }
+
+        if (element.type === 'shuriken_active') {
+            const shurikenScreenX = element.worldX - cameraXRef.current;
+            if (shurikenScreenX + element.size >= 0 && shurikenScreenX <= CANVAS_WIDTH) {
+                ctx.save();
+                ctx.translate(shurikenScreenX + element.size / 2, element.y + element.size / 2);
+                ctx.rotate(element.rotation);
+                ctx.fillStyle = '#555555';
+                ctx.strokeStyle = '#333333';
+                ctx.lineWidth = 2;
+                const armLength = element.size / 2;
+                ctx.beginPath();
+                for (let j = 0; j < 4; j++) {
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(armLength * Math.cos(Math.PI/2 * j), armLength * Math.sin(Math.PI/2 * j));
+                    ctx.lineTo(armLength/2 * Math.cos(Math.PI/2 * j + Math.PI/4), armLength/2 * Math.sin(Math.PI/2 * j + Math.PI/4));
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
+            }
+            return;
         }
 
         if (element.type === 'platform' || element.type === 'bridge_post' || element.type === 'bridge_plank_active') {
@@ -668,7 +727,27 @@ export default function ChickenGamePage() {
                 ctx.lineTo(spikeX + spikeWidth, spikeY + spikeHeight);
                 ctx.closePath(); ctx.fill();
             }
-        
+          } else if (element.type === 'shuriken_active') {
+            const shurikenScreenX = element.worldX - cameraXRef.current;
+            if (shurikenScreenX + element.size >= 0 && shurikenScreenX <= CANVAS_WIDTH) {
+                ctx.save();
+                ctx.translate(shurikenScreenX + element.size / 2, element.y + element.size / 2);
+                ctx.rotate(element.rotation);
+                ctx.fillStyle = '#555555';
+                ctx.strokeStyle = '#333333';
+                ctx.lineWidth = 2;
+                const armLength = element.size / 2;
+                ctx.beginPath();
+                for (let j = 0; j < 4; j++) {
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(armLength * Math.cos(Math.PI/2 * j), armLength * Math.sin(Math.PI/2 * j));
+                    ctx.lineTo(armLength/2 * Math.cos(Math.PI/2 * j + Math.PI/4), armLength/2 * Math.sin(Math.PI/2 * j + Math.PI/4));
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
+            }
         // Drawing falling bridge planks
         } else if (element.type === 'falling_bridge_structure') {
             element.planks.forEach(plank => {
@@ -719,6 +798,15 @@ export default function ChickenGamePage() {
                     ctx.fillRect(elementScreenX + poleWidth + c * squareSize, element.y + r * squareSize, squareSize, squareSize);
                 }
             }
+        } else if (element.type === 'coin' && !element.collected) {
+            const coinRect = { x: elementScreenX, y: element.y, width: COIN_SIZE, height: COIN_SIZE };
+            ctx.fillStyle = '#FFD700'; // Gold color for coins
+            ctx.beginPath();
+            ctx.arc(coinRect.x + COIN_SIZE / 2, coinRect.y + COIN_SIZE / 2, COIN_SIZE / 2, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.strokeStyle = '#B8860B'; // Darker gold for coin edge
+            ctx.lineWidth = 2;
+            ctx.stroke();
         }
     });
 
@@ -939,9 +1027,8 @@ export default function ChickenGamePage() {
     ctx.fillRect(micX, micY - 10, 10, 20); 
     ctx.beginPath(); 
     ctx.arc(micX + 5, micY - 10, 8, Math.PI, 2 * Math.PI); 
-    ctx.fill(); 
-    ctx.fillRect(micX + 2, micY + 10, 6, 10); 
-    ctx.fillText(`Dist: ${score.toFixed(0)}m`, 70, 40);
+    ctx.fill();    ctx.fillRect(micX + 2, micY + 10, 6, 10); 
+    ctx.fillText(`Dist: ${score.toFixed(0)}m | Coins: ${coinScore}`, 70, 40);
     
     if (window.lastSoundVolume !== undefined) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
@@ -959,11 +1046,11 @@ export default function ChickenGamePage() {
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT); 
       ctx.fillStyle = COLOR_TEXT; 
       ctx.font = '48px Arial'; 
-      ctx.textAlign = 'center'; 
-      ctx.fillText('Game Over!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 30); 
+      ctx.textAlign = 'center';      ctx.fillText('Game Over!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 30); 
       ctx.font = '24px Arial'; 
-      ctx.fillText(`Distance: ${score.toFixed(0)}m`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20); 
-      ctx.fillText('Click or Say Something to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 60);
+      ctx.fillText(`Distance: ${score.toFixed(0)}m`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 10); 
+      ctx.fillText(`Coins Collected: ${coinScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 45); 
+      ctx.fillText('Click or Say Something to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 90);
     } else if (gameState === 'won') { 
       updateConfetti(); 
       confettiRef.current.forEach(c => { 
@@ -1017,11 +1104,11 @@ export default function ChickenGamePage() {
       ctx.fill(); 
       ctx.fillStyle = COLOR_TEXT; 
       ctx.font = '48px Arial'; 
-      ctx.textAlign = 'center'; 
-      ctx.fillText('You Won!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 50); 
+      ctx.textAlign = 'center';      ctx.fillText('You Won!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 50); 
       ctx.font = '24px Arial'; 
       ctx.fillText(`Final Distance: ${score.toFixed(0)}m`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 90); 
-      ctx.fillText('Click or Say Something to Play Again', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 130);
+      ctx.fillText(`Coins Collected: ${coinScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 120); 
+      ctx.fillText('Click or Say Something to Play Again', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 160);
     } else if (gameState === 'ready') { 
       ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; 
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT); 
@@ -1029,12 +1116,12 @@ export default function ChickenGamePage() {
       ctx.font = '30px Arial'; 
       ctx.textAlign = 'center'; 
       if (isMicrophoneAllowed === null) { 
-        ctx.fillText('Requesting microphone...', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2); 
+        ctx.fillText('Requesting microphone...', CANVAS_WIDTH / 2, CANVAS_WIDTH / 2); 
       } else if (isMicrophoneAllowed === false) { 
-        ctx.fillText('Mic denied. Click/Space for small jump.', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2); 
+        ctx.fillText('Mic denied. Click/Space for small jump.', CANVAS_WIDTH / 2, CANVAS_WIDTH / 2); 
       } else { 
-        ctx.fillText('Make Sounds to Move & Jump!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 15); 
-        ctx.fillText('Click or Say Loudly to Start.', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 25);
+        ctx.fillText('Make Sounds to Move & Jump!', CANVAS_WIDTH / 2, CANVAS_WIDTH / 2 - 15); 
+        ctx.fillText('Click or Say Loudly to Start.', CANVAS_WIDTH / 2, CANVAS_WIDTH / 2 + 25);
       } 
     }
   }, [gameState, score, isMicrophoneAllowed, updateConfetti, cameraXRef]);
